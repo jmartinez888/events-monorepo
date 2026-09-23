@@ -4,3 +4,28 @@ node_modules
 .turbo
 .docker-temp
 backups
+.pnpm-store
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment files (injected at runtime)
+**/.env
+**/.env.local
+**/.env.*.local
+
+# Build outputs (we rebuild in Docker)
+**/dist
+**/.next
+**/.astro
+
+# Misc
+*.md
+!README.md
+LICENSE
+.gitignore
+.eslintcache
+vercel.json

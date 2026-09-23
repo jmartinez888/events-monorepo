@@ -1,0 +1,52 @@
+# ============================================
+# Panel Admin - Production Dockerfile
+# Vite SPA + React + TailwindCSS → Nginx
+# ============================================
+
+# --- Stage 1: Dependencies ---
+FROM node:22-alpine AS deps
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/panel-admin/package.json ./apps/panel-admin/package.json
+
+RUN pnpm install --frozen-lockfile
+
+# --- Stage 2: Build ---
+FROM node:22-alpine AS build
+WORKDIR /app
+
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/panel-admin/node_modules ./apps/panel-admin/node_modules
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/panel-admin ./apps/panel-admin
+
+# Vite env vars must be available at build time
+ARG VITE_API_URL
+ENV VITE_API_URL=${VITE_API_URL}
+
+ARG VITE_COOKIE_SECRET
+ENV VITE_COOKIE_SECRET=${VITE_COOKIE_SECRET}
+
+WORKDIR /app/apps/panel-admin
+RUN pnpm run build
+
+# --- Stage 3: Nginx ---
+FROM nginx:alpine AS runner
+
+# Remove default nginx config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Copy custom nginx config
+COPY apps/panel-admin/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built assets
+COPY --from=build /app/apps/panel-admin/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
