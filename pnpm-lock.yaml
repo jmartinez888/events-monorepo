@@ -56,6 +56,9 @@ importers:
       nodemailer:
         specifier: ^9.1.1
         version: 9.1.1
+      prisma:
+        specifier: ^6.7.0
+        version: 6.19.3(magicast@0.5.4)(typescript@5.9.2)
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -78,9 +81,6 @@ importers:
       '@types/node':
         specifier: ^22.15.0
         version: 22.15.3
-      prisma:
-        specifier: ^6.7.0
-        version: 6.19.3(magicast@0.5.4)(typescript@5.9.2)
       tsx:
         specifier: ^4.19.3
         version: 4.23.12
@@ -3635,6 +3635,7 @@ packages:
   eslint@9.39.1:
     resolution: {integrity: sha512-BhHmn2yNOFA9H9JmmIVKJmd288g9hrVRDkdoIgRCRuSySRUHH7r/DI6aAXW9T1WwUuY3DFgrcaqB+deURBLR5g==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'

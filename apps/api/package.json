@@ -25,6 +25,7 @@
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
     "nodemailer": "^9.1.1",
+    "prisma": "^6.7.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
@@ -34,7 +35,6 @@
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^22.15.0",
-    "prisma": "^6.7.0",
     "tsx": "^4.19.3",
     "typescript": "^5.9.2"
   }
