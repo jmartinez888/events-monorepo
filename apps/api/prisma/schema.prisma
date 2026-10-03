@@ -105,6 +105,40 @@ enum DeliveryStatus {
   SKIPPED
 }
 
+// ─── CNPP / OTCA Commission Enums ───────────────────────────────────
+
+enum SessionType {
+  ORDINARY
+  EXTRAORDINARY
+}
+
+enum SessionMode {
+  IN_PERSON
+  VIRTUAL
+  HYBRID
+}
+
+enum AttendanceStatus {
+  PRESENT_PRINCIPAL
+  PRESENT_ALTERNATE
+  ABSENT
+  JUSTIFIED
+}
+
+enum MinuteStatus {
+  MINUTE_DRAFT
+  IN_REVIEW
+  MINUTE_APPROVED
+  SIGNED
+}
+
+enum AgreementStatus {
+  PENDING
+  IN_PROGRESS
+  FULFILLED
+  OVERDUE
+}
+
 /// Tipo de entidad que puede reutilizar un recurso multimedia.
 enum MediaOwnerType {
   ORGANIZATION
@@ -212,6 +246,8 @@ model Organization {
   marketingEnrollments MarketingEventEnrollment[]
   portal             OrganizationPortal?
   mediaAssets        MediaAsset[]
+  institutionMembers InstitutionMember[]
+  commissionSessions CommissionSession[]
 
   @@map("organizations")
 }
@@ -872,4 +908,170 @@ model EmailDelivery {
   @@unique([stepId, recipientEmail])
   @@index([status, scheduledAt])
   @@map("email_deliveries")
+}
+
+// ─── CNPP / OTCA Commission Models ──────────────────────────────────
+
+/// Institución miembro de la Comisión (Cancillería, MINAM, etc.)
+model InstitutionMember {
+  id                    String       @id @default(uuid()) @db.Uuid
+  organizationId        String       @map("organization_id") @db.Uuid
+  name                  String
+  acronym               String
+  logoUrl               String?      @map("logo_url")
+  websiteUrl            String?      @map("website_url")
+  address               String?
+  principalName         String       @map("principal_name")
+  principalEmail        String       @map("principal_email")
+  principalRole         String?      @map("principal_role")
+  alternateName         String?      @map("alternate_name")
+  alternateEmail        String?      @map("alternate_email")
+  alternateRole         String?      @map("alternate_role")
+  designationResolution String?      @map("designation_resolution")
+  isActive              Boolean      @default(true) @map("is_active")
+  createdAt             DateTime     @default(now()) @map("created_at")
+  updatedAt             DateTime     @updatedAt @map("updated_at")
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  attendances           SessionAttendance[]
+  agreements            CommissionAgreement[]
+
+  @@index([organizationId])
+  @@map("institution_members")
+}
+
+/// Sesiones y asambleas de la Comisión (ordinarias / extraordinarias).
+model CommissionSession {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @map("organization_id") @db.Uuid
+  sessionNumber     Int               @map("session_number")
+  year              Int
+  title             String
+  type              SessionType       @default(ORDINARY)
+  mode              SessionMode       @default(IN_PERSON)
+  scheduledDate     DateTime          @map("scheduled_date")
+  startTime         String            @map("start_time")
+  endTime           String?           @map("end_time")
+  location          String?
+  virtualMeetingUrl String?           @map("virtual_meeting_url")
+  quorumRequired    Int               @default(12) @map("quorum_required")
+  quorumReached     Boolean           @default(false) @map("quorum_reached")
+  isClosed          Boolean           @default(false) @map("is_closed")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+  organization      Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agendaItems       SessionAgendaItem[]
+  attendances       SessionAttendance[]
+  minute            SessionMinute?
+  documents         SessionDocument[]
+  agreements        CommissionAgreement[]
+
+  @@unique([organizationId, sessionNumber, year])
+  @@index([organizationId, year])
+  @@map("commission_sessions")
+}
+
+/// Puntos del orden del día de una sesión.
+model SessionAgendaItem {
+  id                   String            @id @default(uuid()) @db.Uuid
+  sessionId            String            @map("session_id") @db.Uuid
+  orderIndex           Int               @default(1) @map("order_index")
+  topic                String
+  presenterInstitution String?           @map("presenter_institution")
+  presenterName        String?           @map("presenter_name")
+  durationMinutes      Int?              @map("duration_minutes")
+  session              CommissionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, orderIndex])
+  @@map("session_agenda_items")
+}
+
+/// Registro de asistencia por institución y control de quórum.
+model SessionAttendance {
+  id              String            @id @default(uuid()) @db.Uuid
+  sessionId       String            @map("session_id") @db.Uuid
+  institutionId   String            @map("institution_id") @db.Uuid
+  status          AttendanceStatus  @default(ABSENT)
+  attendeeName    String?           @map("attendee_name")
+  notes           String?
+  registeredAt    DateTime?         @map("registered_at")
+  session         CommissionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  institution     InstitutionMember @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, institutionId])
+  @@map("session_attendances")
+}
+
+/// Acta oficial de una sesión de la Comisión.
+model SessionMinute {
+  id              String            @id @default(uuid()) @db.Uuid
+  sessionId       String            @unique @map("session_id") @db.Uuid
+  minuteCode      String            @unique @map("minute_code")
+  status          MinuteStatus      @default(MINUTE_DRAFT)
+  summary         String?           @db.Text
+  contentHtml     String?           @map("content_html") @db.Text
+  generatedPdfUrl String?           @map("generated_pdf_url")
+  signedPdfUrl    String?           @map("signed_pdf_url")
+  isPublic        Boolean           @default(false) @map("is_public")
+  approvedAt      DateTime?         @map("approved_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  session         CommissionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("session_minutes")
+}
+
+/// Acuerdos adoptados en sesión con seguimiento de cumplimiento.
+model CommissionAgreement {
+  id              String            @id @default(uuid()) @db.Uuid
+  sessionId       String            @map("session_id") @db.Uuid
+  institutionId   String            @map("institution_id") @db.Uuid
+  agreementCode   String            @map("agreement_code")
+  description     String            @db.Text
+  deadline        DateTime
+  status          AgreementStatus   @default(PENDING)
+  priority        String            @default("MEDIA")
+  progressNotes   String?           @map("progress_notes") @db.Text
+  completedAt     DateTime?         @map("completed_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  session         CommissionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  institution     InstitutionMember @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  evidences       AgreementEvidence[]
+
+  @@index([sessionId])
+  @@index([institutionId, status])
+  @@map("commission_agreements")
+}
+
+/// Evidencias de cumplimiento adjuntadas por la institución responsable.
+model AgreementEvidence {
+  id              String              @id @default(uuid()) @db.Uuid
+  agreementId     String              @map("agreement_id") @db.Uuid
+  title           String
+  fileUrl         String              @map("file_url")
+  fileType        String?             @map("file_type")
+  fileSizeBytes   Int?                @map("file_size_bytes")
+  uploadedBy      String?             @map("uploaded_by")
+  uploadedAt      DateTime            @default(now()) @map("uploaded_at")
+  notes           String?             @db.Text
+  agreement       CommissionAgreement @relation(fields: [agreementId], references: [id], onDelete: Cascade)
+
+  @@index([agreementId])
+  @@map("agreement_evidences")
+}
+
+/// Documentos y presentaciones asociados a una sesión.
+model SessionDocument {
+  id              String            @id @default(uuid()) @db.Uuid
+  sessionId       String            @map("session_id") @db.Uuid
+  title           String
+  category        String
+  fileUrl         String            @map("file_url")
+  fileSizeBytes   Int?              @map("file_size_bytes")
+  isPublic        Boolean           @default(false) @map("is_public")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  session         CommissionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("session_documents")
 }

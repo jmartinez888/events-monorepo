@@ -1,0 +1,116 @@
+---
+import PortalLayout from '../../layouts/PortalLayout.astro';
+import { portalApi } from '../../lib/api';
+
+const { institution } = Astro.params;
+if (!institution) return Astro.redirect('/');
+
+let data;
+try {
+  data = await portalApi.transparency(institution);
+} catch {
+  return new Response('Portal de transparencia no encontrado', { status: 404 });
+}
+
+const organization = data.organization;
+const sessions = data.sessions || [];
+const institutions = data.institutions || [];
+
+const dateFormatter = new Intl.DateTimeFormat('es-PE', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
+---
+
+<PortalLayout
+  organization={organization}
+  title={`Portal de Transparencia · ${organization.name}`}
+>
+  <div class="tdc-hero" style="min-height: 40vh; display: flex; align-items: center;">
+    <div class="tdc-hero-bg" style={organization.coverUrl ? `background-image: url(${organization.coverUrl})` : ''}></div>
+    <div class="tdc-hero-vignette"></div>
+    <div class="tdc-container tdc-hero-container" style="padding-top: 100px;">
+      <div class="tdc-hero-center">
+        <h1 class="tdc-hero-headline" style="font-size: 3rem;">Portal de Transparencia</h1>
+        <p class="tdc-hero-sub" style="margin-top: 1rem; opacity: 0.9;">
+          Comisión Nacional Permanente Peruana de la OTCA
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <main class="tdc-container" style="padding: 4rem 0;">
+    <div style="display: grid; grid-template-columns: 1fr; gap: 4rem;">
+      
+      <!-- Sesiones y Actas -->
+      <section>
+        <h2 style="font-size: 2rem; font-weight: 700; margin-bottom: 2rem; color: var(--tdc-text);">Actas de Sesiones (Públicas)</h2>
+        
+        {sessions.length === 0 ? (
+          <p style="color: var(--tdc-text-muted);">No hay sesiones públicas disponibles por el momento.</p>
+        ) : (
+          <div style="display: grid; gap: 1.5rem;">
+            {sessions.map((session: any) => (
+              <div style="background: var(--tdc-card); border: 1px solid var(--tdc-border); border-radius: 8px; padding: 2rem;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
+                  <div>
+                    <span style="display: inline-block; padding: 0.25rem 0.75rem; background: var(--tdc-accent); color: #fff; border-radius: 99px; font-size: 0.75rem; font-weight: 600; margin-bottom: 1rem;">
+                      {session.type === 'ORDINARY' ? 'Ordinaria' : 'Extraordinaria'}
+                    </span>
+                    <h3 style="font-size: 1.5rem; font-weight: 600; color: var(--tdc-text);">{session.title}</h3>
+                    <p style="color: var(--tdc-text-muted); margin-top: 0.5rem;">
+                      {dateFormatter.format(new Date(session.scheduledDate))} • {session.mode}
+                    </p>
+                  </div>
+                </div>
+
+                {session.minute && session.minute.isPublic ? (
+                  <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--tdc-border);">
+                    <h4 style="font-weight: 600; margin-bottom: 0.5rem; color: var(--tdc-text);">Acta Oficial: {session.minute.minuteCode}</h4>
+                    {session.minute.summary && (
+                      <p style="color: var(--tdc-text-muted); margin-bottom: 1rem; font-size: 0.95rem;">{session.minute.summary}</p>
+                    )}
+                    {session.minute.signedPdfUrl && (
+                      <a href={session.minute.signedPdfUrl} target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; color: var(--tdc-accent); font-weight: 500; text-decoration: none;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        Descargar Acta Firmada (PDF)
+                      </a>
+                    )}
+                  </div>
+                ) : (
+                  <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--tdc-border);">
+                    <p style="color: var(--tdc-text-muted); font-size: 0.9rem;">El acta de esta sesión aún no es de dominio público.</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <!-- Instituciones Miembro -->
+      <section>
+        <h2 style="font-size: 2rem; font-weight: 700; margin-bottom: 2rem; color: var(--tdc-text);">Directorio Institucional</h2>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.5rem;">
+          {institutions.map((inst: any) => (
+            <div style="background: var(--tdc-card); border: 1px solid var(--tdc-border); border-radius: 8px; padding: 1.5rem; text-align: center;">
+              {inst.logoUrl && (
+                <img src={inst.logoUrl} alt={`Logo ${inst.acronym}`} style="height: 60px; object-fit: contain; margin: 0 auto 1rem;" />
+              )}
+              <h3 style="font-weight: 600; color: var(--tdc-text);">{inst.name}</h3>
+              <p style="color: var(--tdc-text-muted); font-size: 0.875rem; margin-top: 0.5rem; font-weight: 500;">{inst.acronym}</p>
+              
+              <div style="margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--tdc-border); text-align: left;">
+                <p style="font-size: 0.8rem; color: var(--tdc-text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem;">Representante Titular</p>
+                <p style="font-weight: 500; color: var(--tdc-text); font-size: 0.95rem;">{inst.principalName}</p>
+                <p style="color: var(--tdc-text-muted); font-size: 0.85rem; margin-top: 0.25rem;">{inst.principalRole || 'Delegado'}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+    </div>
+  </main>
+</PortalLayout>

@@ -16,6 +16,7 @@ import { EmailSettingsModule } from './modules/email-settings/email-settings.mod
 import { MarketingModule } from './modules/marketing/marketing.module.js';
 import { PublicEventsModule } from './modules/public-events/public-events.module.js';
 import { MediaModule } from './modules/media/media.module.js';
+import { CommissionModule } from './modules/commission/commission.module.js';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { MediaModule } from './modules/media/media.module.js';
     MarketingModule,
     PublicEventsModule,
     MediaModule,
+    CommissionModule,
   ],
   controllers: [HealthController],
 })

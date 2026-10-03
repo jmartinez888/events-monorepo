@@ -23,6 +23,16 @@ export const getAdminRoutes = (_locale?: string): AdminRouteItem[] => {
       icon: Calendar,
     },
     {
+      title: "Comisión (CNPP)",
+      url: "/dashboard/commission",
+      icon: Users, // Alternatively building or briefcase, but using Users to avoid new icon imports if missing
+      items: [
+        { title: "Instituciones", url: "/dashboard/commission/institutions" },
+        { title: "Sesiones", url: "/dashboard/commission/sessions" },
+        { title: "Acuerdos", url: "/dashboard/commission/agreements" },
+      ]
+    },
+    {
       title: "Plantillas",
       url: `/dashboard/templates`,
       icon: Mail,

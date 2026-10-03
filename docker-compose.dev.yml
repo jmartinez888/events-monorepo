@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: events
+      POSTGRES_USER: events
+      POSTGRES_PASSWORD: events
+    ports:
+      - "5433:5432"
+    volumes:
+      - events-postgres-dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U events -d events"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+    command: sh -c "pnpm -C apps/api run prisma:deploy && pnpm -C apps/api run build && (pnpm -C apps/api exec tsc -w --preserveWatchOutput -p tsconfig.json & node --watch apps/api/dist/main.js)"
+    environment:
+      DATABASE_URL: postgresql://events:events@postgres:5432/events?schema=public
+      PORT: 3000
+      FRONTEND_URL: http://localhost:5173
+      JWT_ACCESS_SECRET: local-access-secret-change-me
+      JWT_REFRESH_SECRET: local-refresh-secret-change-me
+    ports:
+      - "3010:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/panel-admin/node_modules
+      - /app/apps/events-portal/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  panel-admin:
+    build:
+      context: .
+      dockerfile: apps/panel-admin/Dockerfile.dev
+    command: pnpm -C apps/panel-admin run dev --host 0.0.0.0
+    environment:
+      VITE_API_URL: http://localhost:3010
+    ports:
+      - "5173:5173"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/panel-admin/node_modules
+      - /app/apps/events-portal/node_modules
+    depends_on:
+      - api
+
+  events-portal:
+    build:
+      context: .
+      dockerfile: apps/events-portal/Dockerfile.dev
+    command: pnpm -C apps/events-portal run dev --host 0.0.0.0
+    environment:
+      INTERNAL_API_URL: http://api:3000/api
+      PUBLIC_API_URL: http://localhost:3010
+    ports:
+      - "4321:4321"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/panel-admin/node_modules
+      - /app/apps/events-portal/node_modules
+    depends_on:
+      - api
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    profiles: ["tools"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@events.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+volumes:
+  events-postgres-dev:

@@ -1,9 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Link from 'next/link'
 import { Moon, Sun, Menu, X, ArrowRight } from 'lucide-react'
-import { useTheme } from 'next-themes'
 import { LogoRender } from '@/components/app/logo-render'
 
 export interface WebinarNavbarProps {
@@ -15,7 +13,7 @@ export interface WebinarNavbarProps {
 export function WebinarNavbar({ institution = 'medmind', hasSpeakers = true, hasAgenda = true }: WebinarNavbarProps) {
     const [isAtTop, setIsAtTop] = useState(true)
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-    const { theme, setTheme } = useTheme()
+    const [theme, setTheme] = useState('light')
     const [mounted, setMounted] = useState(false)
 
     useEffect(() => {
@@ -49,13 +47,13 @@ export function WebinarNavbar({ institution = 'medmind', hasSpeakers = true, has
                 <div className="flex items-center justify-between h-16 sm:h-20">
                     {/* Brand */}
                     <div className="flex items-center gap-3">
-                        <Link href={`/${institution}`} className="flex items-center">
+                        <a href={`/${institution}`} className="flex items-center">
                             <LogoRender
                                 variant="full"
                                 className="w-28 sm:w-32 text-foreground"
                                 classNameImg="text-foreground"
                             />
-                        </Link>
+                        </a>
                         <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-mono font-medium tracking-wide uppercase bg-medmind-cyan/10 text-medmind-cyan border border-medmind-cyan/20">
                             Webinar
                         </span>

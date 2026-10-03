@@ -6,7 +6,11 @@ import { IS_PUBLIC_ROUTE } from '../../common/public.decorator.js';
 /** Validates the access token once for every non-public API route. */
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwt: JwtService, private readonly reflector: Reflector) {}
+  private readonly reflector: Reflector;
+
+  constructor(private readonly jwt: JwtService, reflector?: Reflector) {
+    this.reflector = reflector ?? new Reflector();
+  }
 
   async canActivate(context: ExecutionContext) {
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_ROUTE, [context.getHandler(), context.getClass()])) return true;

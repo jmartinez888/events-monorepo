@@ -252,4 +252,44 @@ export const api = {
     dispatchDue: (limit = 100) => apiFetch<any>(`/marketing/deliveries/dispatch?limit=${limit}`, { method: "POST" }),
     analytics: (organizationId: string) => apiFetch<Record<string, number>>(`/organizations/${organizationId}/marketing/analytics`),
   },
+
+  // ─── CNPP / OTCA Commission ─────────────────────────────────────
+  commission: {
+    // Institutions
+    listInstitutions: (orgId: string) => apiFetch<any[]>(`/commission/institutions?organizationId=${orgId}`),
+    getInstitution: (id: string) => apiFetch<any>(`/commission/institutions/${id}`),
+    createInstitution: (data: any) => apiFetch<any>("/commission/institutions", { method: "POST", body: JSON.stringify(data) }),
+    updateInstitution: (id: string, data: any) => apiFetch<any>(`/commission/institutions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    removeInstitution: (id: string) => apiFetch<any>(`/commission/institutions/${id}`, { method: "DELETE" }),
+    // Sessions
+    listSessions: (orgId: string, year?: number) => apiFetch<any[]>(`/commission/sessions?organizationId=${orgId}${year ? `&year=${year}` : ""}`),
+    getSession: (id: string) => apiFetch<any>(`/commission/sessions/${id}`),
+    createSession: (data: any) => apiFetch<any>("/commission/sessions", { method: "POST", body: JSON.stringify(data) }),
+    updateSession: (id: string, data: any) => apiFetch<any>(`/commission/sessions/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    removeSession: (id: string) => apiFetch<any>(`/commission/sessions/${id}`, { method: "DELETE" }),
+    // Agenda
+    addAgendaItem: (sessionId: string, data: any) => apiFetch<any>(`/commission/sessions/${sessionId}/agenda`, { method: "POST", body: JSON.stringify(data) }),
+    removeAgendaItem: (id: string) => apiFetch<any>(`/commission/sessions/agenda/${id}`, { method: "DELETE" }),
+    // Attendance
+    setAttendance: (sessionId: string, institutionId: string, data: any) => apiFetch<any>(`/commission/sessions/${sessionId}/attendance/${institutionId}`, { method: "PUT", body: JSON.stringify(data) }),
+    // Minutes
+    upsertMinute: (sessionId: string, data: any) => apiFetch<any>(`/commission/sessions/${sessionId}/minute`, { method: "PUT", body: JSON.stringify(data) }),
+    // Session Documents
+    addSessionDocument: (sessionId: string, data: any) => apiFetch<any>(`/commission/sessions/${sessionId}/documents`, { method: "POST", body: JSON.stringify(data) }),
+    removeSessionDocument: (id: string) => apiFetch<any>(`/commission/sessions/documents/${id}`, { method: "DELETE" }),
+    // Agreements
+    listAgreements: (orgId: string, filters?: Record<string, string>) => {
+      const params = new URLSearchParams({ organizationId: orgId, ...filters })
+      return apiFetch<any[]>(`/commission/agreements?${params}`)
+    },
+    getAgreement: (id: string) => apiFetch<any>(`/commission/agreements/${id}`),
+    createAgreement: (data: any) => apiFetch<any>("/commission/agreements", { method: "POST", body: JSON.stringify(data) }),
+    updateAgreement: (id: string, data: any) => apiFetch<any>(`/commission/agreements/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+    removeAgreement: (id: string) => apiFetch<any>(`/commission/agreements/${id}`, { method: "DELETE" }),
+    // Evidences
+    addEvidence: (agreementId: string, data: any) => apiFetch<any>(`/commission/agreements/${agreementId}/evidences`, { method: "POST", body: JSON.stringify(data) }),
+    removeEvidence: (id: string) => apiFetch<any>(`/commission/agreements/evidences/${id}`, { method: "DELETE" }),
+    // Stats
+    stats: (orgId: string) => apiFetch<any>(`/commission/agreements/stats?organizationId=${orgId}`),
+  },
 }

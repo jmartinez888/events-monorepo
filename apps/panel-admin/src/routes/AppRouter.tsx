@@ -65,6 +65,7 @@ import {
   EmailTemplateBuilderPage,
 } from "@/pages/templates"
 import { MarketingPage } from "@/pages/marketing"
+import { InstitutionsPage, SessionsPage, AgreementsPage } from "@/pages/commission"
 
 function HashHandler() {
   const navigate = useNavigate()
@@ -173,6 +174,11 @@ export function AppRouter() {
 
           {/* Certificates Catalog */}
           <Route path="certificates" element={<GlobalCertificatesPage />} />
+
+          {/* Commission (CNPP) */}
+          <Route path="commission/institutions" element={<InstitutionsPage />} />
+          <Route path="commission/sessions" element={<SessionsPage />} />
+          <Route path="commission/agreements" element={<AgreementsPage />} />
 
           {/* Settings Page */}
           <Route path="settings/business" element={<OrganizationSettingsPage />} />

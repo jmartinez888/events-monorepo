@@ -1,0 +1,14 @@
+FROM node:20-slim
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y openssl python3 make g++ curl && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
+COPY apps/api/package.json ./apps/api/
+COPY apps/panel-admin/package.json ./apps/panel-admin/
+COPY apps/events-portal/package.json ./apps/events-portal/
+
+RUN pnpm install
+
+CMD ["pnpm", "turbo", "run", "dev", "--filter=panel-admin"]

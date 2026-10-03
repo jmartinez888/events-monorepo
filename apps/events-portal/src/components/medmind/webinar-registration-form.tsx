@@ -18,7 +18,6 @@ import { PhoneCountryInput } from '@/components/ui/phone-country-input'
 import { registerEvent } from '@/services/events.service'
 import { checkWebinarRegistration } from '@/services/webinar.service'
 import { WEBINAR_EVENT_TYPE } from '@/config/constants'
-import Image from 'next/image'
 
 const DEFAULT_EVENT_TYPE = WEBINAR_EVENT_TYPE || 'webinar-7-setiembre-2026'
 
@@ -264,9 +263,8 @@ export function WebinarRegistrationForm({
                                     ¡TU LUGAR ESTÁ <span className="text-[#00b49d]">RESERVADO!</span>
                                 </h2>
 
-                                {/* Success Illustration */}
                                 <div className="relative my-6 flex items-center justify-center">
-                                    <Image
+                                    <img
                                         src="/assets/images/webinar-registration-success.png"
                                         alt="Registro confirmado"
                                         width={320}
