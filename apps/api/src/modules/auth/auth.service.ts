@@ -2,8 +2,10 @@ import { ConflictException, Injectable, NotFoundException, UnauthorizedException
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../../database/prisma.service.js';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { MailService } from '../mail/mail.service.js';
+import { publicAccountSelect } from './public-account.js';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -55,22 +57,24 @@ export class AuthService {
     role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER';
   }) {
     const password = data.password ?? randomBytes(12).toString('base64url');
-    const id = randomBytes(16).toString('hex');
+    const id = randomUUID();
     const passwordHash = await bcrypt.hash(password, 10);
     let user;
     try {
-      user = await this.prisma.authUser.create({ data: { id, email: data.email.toLowerCase().trim(), passwordHash, role: data.role ?? 'USER' } });
-    } catch (error: any) {
-      if (error?.code === 'P2002') throw new ConflictException('Ya existe una cuenta registrada con este correo electrónico.');
+      user = await this.prisma.authUser.create({
+        data: {
+          id,
+          email: data.email.toLowerCase().trim(),
+          passwordHash,
+          role: data.role ?? 'USER',
+          profile: { create: { firstName: data.firstName, lastName: data.lastName } },
+        },
+        select: { ...publicAccountSelect, profile: true },
+      });
+    } catch (error: unknown) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new ConflictException('Ya existe una cuenta registrada con este correo electrónico.');
       throw error;
     }
-    const profile = await this.prisma.profile.create({
-      data: {
-        authUserId: user.id,
-        firstName: data.firstName,
-        lastName: data.lastName,
-      },
-    });
 
     const fullName = `${data.firstName ?? ''} ${data.lastName ?? ''}`.trim() || undefined;
     const delivery = await this.mail.sendWelcome(user.email, {
@@ -84,14 +88,14 @@ export class AuthService {
       email: user.email,
       role: user.role,
       isActive: user.isActive,
-      profile,
+      profile: user.profile,
       emailSent: delivery.sent,
     };
   }
 
   listAccounts() {
     return this.prisma.authUser.findMany({
-      include: { profile: true },
+      select: { ...publicAccountSelect, profile: true },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -118,14 +122,14 @@ export class AuthService {
         isActive: data.isActive,
         passwordHash,
       },
-      include: { profile: true },
+      select: { ...publicAccountSelect, profile: true },
     });
   }
 
   async removeAccount(id: string) {
     const exists = await this.prisma.authUser.findUnique({ where: { id } });
     if (!exists) throw new NotFoundException('Cuenta no encontrada');
-    return this.prisma.authUser.delete({ where: { id } });
+    return this.prisma.authUser.delete({ where: { id }, select: publicAccountSelect });
   }
 
   async resetPasswordByAdmin(id: string) {

@@ -4,6 +4,7 @@ import { organizationPermissions } from './organization-permissions.js';
 import { AuthService } from '../auth/auth.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { randomBytes } from 'node:crypto';
+import { publicAccountSelect } from '../auth/public-account.js';
 
 @Injectable()
 export class OrganizationsService {
@@ -26,8 +27,8 @@ export class OrganizationsService {
   async addBranch(organizationId: string, data: any) { if (data.isMain) await this.prisma.organizationBranch.updateMany({ where: { organizationId }, data: { isMain: false } }); return this.prisma.organizationBranch.create({ data: { ...data, organizationId } }); }
   updateBranch(id: string, data: Record<string, unknown>) { return this.prisma.organizationBranch.update({ where: { id }, data }); }
   removeBranch(id: string) { return this.prisma.organizationBranch.delete({ where: { id } }); }
-  async members(organizationId: string) { const members = await this.prisma.organizationMember.findMany({ where: { organizationId }, include: { profile: { include: { authUser: true } } }, orderBy: { createdAt: 'desc' } }); return members.map(({ profile, ...member }) => ({ ...member, profile: { ...profile, first_name: profile.firstName, last_name: profile.lastName, avatar_url: profile.avatarUrl, email: profile.authUser?.email ?? null } })); }
-  async addMember(organizationId: string, profileId: string, role: 'OWNER' | 'ADMIN' | 'EDITOR' | 'MEMBER' = 'MEMBER') { const profile = await this.prisma.profile.findUnique({ where: { id: profileId } }); if (!profile?.authUserId) throw new BadRequestException('El perfil debe tener una cuenta de acceso para ser miembro de una institución'); return this.prisma.organizationMember.create({ data: { organizationId, profileId, accountId: profile.authUserId, role }, include: { profile: { include: { authUser: true } } } }); }
+  async members(organizationId: string) { const members = await this.prisma.organizationMember.findMany({ where: { organizationId }, include: { profile: { include: { authUser: { select: publicAccountSelect } } } }, orderBy: { createdAt: 'desc' } }); return members.map(({ profile, ...member }) => ({ ...member, profile: { ...profile, first_name: profile.firstName, last_name: profile.lastName, avatar_url: profile.avatarUrl, email: profile.authUser?.email ?? null } })); }
+  async addMember(organizationId: string, profileId: string, role: 'OWNER' | 'ADMIN' | 'EDITOR' | 'MEMBER' = 'MEMBER') { const profile = await this.prisma.profile.findUnique({ where: { id: profileId } }); if (!profile?.authUserId) throw new BadRequestException('El perfil debe tener una cuenta de acceso para ser miembro de una institución'); return this.prisma.organizationMember.create({ data: { organizationId, profileId, accountId: profile.authUserId, role }, include: { profile: { include: { authUser: { select: publicAccountSelect } } } } }); }
   async inviteMember(organizationId: string, email: string, role: 'OWNER' | 'ADMIN' | 'EDITOR' | 'MEMBER' = 'MEMBER') {
     const organization = await this.prisma.organization.findUnique({ where: { id: organizationId } });
     if (!organization) throw new NotFoundException('Organización no encontrada');

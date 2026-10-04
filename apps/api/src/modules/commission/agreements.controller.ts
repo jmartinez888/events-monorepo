@@ -1,7 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseEnumPipe, ParseIntPipe, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { AgreementStatus } from '@prisma/client';
 import { AgreementsService } from './agreements.service.js';
+import { CommissionAccessGuard, CommissionResource } from './commission-access.guard.js';
+import { AgreementDto, EvidenceDto, UpdateAgreementDto } from './commission.dto.js';
 
 @Controller('commission/agreements')
+@CommissionResource('agreements')
+@UseGuards(CommissionAccessGuard)
 export class AgreementsController {
   constructor(private readonly service: AgreementsService) {}
 
@@ -13,14 +18,14 @@ export class AgreementsController {
   @Get()
   list(
     @Query('organizationId') organizationId: string,
-    @Query('institutionId') institutionId?: string,
-    @Query('status') status?: string,
-    @Query('year') year?: string,
+    @Query('institutionId', new ParseUUIDPipe({ optional: true })) institutionId?: string,
+    @Query('status', new ParseEnumPipe(AgreementStatus, { optional: true })) status?: AgreementStatus,
+    @Query('year', new ParseIntPipe({ optional: true })) year?: number,
   ) {
     return this.service.list(organizationId, {
       institutionId,
       status,
-      year: year ? Number(year) : undefined,
+      year,
     });
   }
 
@@ -30,13 +35,13 @@ export class AgreementsController {
   }
 
   @Post()
-  create(@Body() body: Record<string, any>) {
+  create(@Body() body: AgreementDto) {
     return this.service.create(body.sessionId, body);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.service.update(id, body);
+  update(@Param('id') id: string, @Body() body: UpdateAgreementDto) {
+    return this.service.update(id, { ...body });
   }
 
   @Delete(':id')
@@ -47,7 +52,7 @@ export class AgreementsController {
   // ── Evidences ───────────────────────────────────────────────────
 
   @Post(':id/evidences')
-  addEvidence(@Param('id') agreementId: string, @Body() body: Record<string, any>) {
+  addEvidence(@Param('id') agreementId: string, @Body() body: EvidenceDto) {
     return this.service.addEvidence(agreementId, body);
   }
 

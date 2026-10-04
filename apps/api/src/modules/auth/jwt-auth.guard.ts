@@ -16,9 +16,14 @@ export class JwtAuthGuard implements CanActivate {
     if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_ROUTE, [context.getHandler(), context.getClass()])) return true;
     const request = context.switchToHttp().getRequest();
     const header = request.headers.authorization;
-    if (!header?.startsWith('Bearer ')) throw new UnauthorizedException('Se requiere una sesión válida');
+    if (typeof header !== 'string' || !header.startsWith('Bearer ')) throw new UnauthorizedException('Se requiere una sesión válida');
     try {
-      const payload = await this.jwt.verifyAsync(header.slice(7), { secret: process.env.JWT_ACCESS_SECRET || 'dev-access-secret' });
+      const secret = process.env.JWT_ACCESS_SECRET;
+      if (!secret) throw new UnauthorizedException();
+      const payload = await this.jwt.verifyAsync<{ sub?: string; role?: string; type?: string }>(header.slice(7), { secret });
+      if (typeof payload.sub !== 'string' || !payload.sub || !['SUPER_ADMIN', 'ADMIN', 'USER'].includes(payload.role ?? '') || payload.type === 'refresh') {
+        throw new UnauthorizedException();
+      }
       request.user = { accountId: payload.sub, role: payload.role };
       return true;
     } catch {

@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { IsEmail, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, MinLength } from 'class-validator';
 import { AuthService } from './auth.service.js';
 import { AdminGuard } from './admin.guard.js';
 import { Public } from '../../common/public.decorator.js';
@@ -8,8 +8,8 @@ class LoginDto { @IsEmail() email!: string; @IsString() @MinLength(8) password!:
 class ForgotDto { @IsEmail() email!: string; }
 class ResetDto { @IsString() token!: string; @IsString() @MinLength(8) password!: string; }
 class RefreshDto { @IsString() refreshToken!: string; }
-class AdminCreateDto { @IsEmail() email!: string; @IsOptional() @IsString() @MinLength(8) password?: string; @IsOptional() @IsString() firstName?: string; @IsOptional() @IsString() lastName?: string; @IsOptional() @IsString() role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER'; }
-class UpdateAccountDto { @IsOptional() @IsEmail() email?: string; @IsOptional() @IsString() role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER'; @IsOptional() isActive?: boolean; @IsOptional() @IsString() @MinLength(8) password?: string; }
+class AdminCreateDto { @IsEmail() email!: string; @IsOptional() @IsString() @MinLength(8) password?: string; @IsOptional() @IsString() firstName?: string; @IsOptional() @IsString() lastName?: string; @IsOptional() @IsIn(['SUPER_ADMIN', 'ADMIN', 'USER']) role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER'; }
+class UpdateAccountDto { @IsOptional() @IsEmail() email?: string; @IsOptional() @IsIn(['SUPER_ADMIN', 'ADMIN', 'USER']) role?: 'SUPER_ADMIN' | 'ADMIN' | 'USER'; @IsOptional() @IsBoolean() isActive?: boolean; @IsOptional() @IsString() @MinLength(8) password?: string; }
 
 @Controller('auth')
 export class AuthController {

@@ -8,9 +8,10 @@ import { AgreementsController } from './agreements.controller.js';
 import { AgreementsService } from './agreements.service.js';
 import { PublicCommissionController } from './public-commission.controller.js';
 import { PublicCommissionService } from './public-commission.service.js';
+import { CommissionAccessGuard } from './commission-access.guard.js';
 
 @Module({
   controllers: [InstitutionsController, SessionsController, AgreementsController, PublicCommissionController],
-  providers: [InstitutionsService, SessionsService, AgreementsService, PublicCommissionService, PrismaService],
+  providers: [InstitutionsService, SessionsService, AgreementsService, PublicCommissionService, PrismaService, CommissionAccessGuard],
 })
 export class CommissionModule {}

@@ -1,13 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { SessionsService } from './sessions.service.js';
+import { CommissionAccessGuard, CommissionResource } from './commission-access.guard.js';
+import { AgendaDto, AttendanceDto, DocumentDto, MinuteDto, SessionDto, UpdateSessionDto } from './commission.dto.js';
 
 @Controller('commission/sessions')
+@CommissionResource('sessions')
+@UseGuards(CommissionAccessGuard)
 export class SessionsController {
   constructor(private readonly service: SessionsService) {}
 
   @Get()
-  list(@Query('organizationId') organizationId: string, @Query('year') year?: string) {
-    return this.service.list(organizationId, year ? Number(year) : undefined);
+  list(@Query('organizationId') organizationId: string, @Query('year', new ParseIntPipe({ optional: true })) year?: number) {
+    return this.service.list(organizationId, year);
   }
 
   @Get(':id')
@@ -16,13 +20,13 @@ export class SessionsController {
   }
 
   @Post()
-  create(@Body() body: Record<string, any>) {
+  create(@Body() body: SessionDto) {
     return this.service.create(body.organizationId, body);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.service.update(id, body);
+  update(@Param('id') id: string, @Body() body: UpdateSessionDto) {
+    return this.service.update(id, { ...body });
   }
 
   @Delete(':id')
@@ -33,7 +37,7 @@ export class SessionsController {
   // ── Agenda ──────────────────────────────────────────────────────
 
   @Post(':id/agenda')
-  addAgendaItem(@Param('id') sessionId: string, @Body() body: Record<string, any>) {
+  addAgendaItem(@Param('id') sessionId: string, @Body() body: AgendaDto) {
     return this.service.addAgendaItem(sessionId, body);
   }
 
@@ -48,7 +52,7 @@ export class SessionsController {
   setAttendance(
     @Param('id') sessionId: string,
     @Param('institutionId') institutionId: string,
-    @Body() body: Record<string, any>,
+    @Body() body: AttendanceDto,
   ) {
     return this.service.setAttendance(sessionId, institutionId, body);
   }
@@ -56,14 +60,14 @@ export class SessionsController {
   // ── Minutes ─────────────────────────────────────────────────────
 
   @Put(':id/minute')
-  upsertMinute(@Param('id') sessionId: string, @Body() body: Record<string, any>) {
+  upsertMinute(@Param('id') sessionId: string, @Body() body: MinuteDto) {
     return this.service.upsertMinute(sessionId, body);
   }
 
   // ── Documents ───────────────────────────────────────────────────
 
   @Post(':id/documents')
-  addDocument(@Param('id') sessionId: string, @Body() body: Record<string, any>) {
+  addDocument(@Param('id') sessionId: string, @Body() body: DocumentDto) {
     return this.service.addDocument(sessionId, body);
   }
 

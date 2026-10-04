@@ -1,7 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { InstitutionsService } from './institutions.service.js';
+import { CommissionAccessGuard, CommissionResource } from './commission-access.guard.js';
+import { InstitutionDto, UpdateInstitutionDto } from './commission.dto.js';
 
 @Controller('commission/institutions')
+@CommissionResource('institutions')
+@UseGuards(CommissionAccessGuard)
 export class InstitutionsController {
   constructor(private readonly service: InstitutionsService) {}
 
@@ -16,13 +20,13 @@ export class InstitutionsController {
   }
 
   @Post()
-  create(@Body() body: Record<string, any>) {
+  create(@Body() body: InstitutionDto) {
     return this.service.create(body.organizationId, body);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: Record<string, unknown>) {
-    return this.service.update(id, body);
+  update(@Param('id') id: string, @Body() body: UpdateInstitutionDto) {
+    return this.service.update(id, { ...body });
   }
 
   @Delete(':id')
