@@ -4,13 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "seed": "tsx prisma/seed.ts",
-    "dev": "tsx watch src/main.ts",
+    "seed": "tsx --env-file-if-exists=../../.env prisma/seed.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/main.js",
+    "test:adaptation": "node --test test/adaptation.integration.test.mjs",
+    "start": "node --env-file-if-exists=../../.env dist/main.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy"
+    "prisma:deploy": "prisma migrate deploy",
+    "test:integration": "node --test --test-concurrency=1 test/adaptation.integration.test.mjs test/iiap-phase2.integration.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1072.0",

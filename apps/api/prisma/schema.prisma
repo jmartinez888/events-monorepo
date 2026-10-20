@@ -47,8 +47,97 @@ enum SubscriptionStatus {
 }
 
 enum CertificateStatus {
+  PENDING
   ISSUED
+  FAILED
   REVOKED
+  SUPERSEDED
+}
+
+/// Segundo factor elegido por la persona. Es opcional para todas las cuentas.
+enum TwoFactorMethod {
+  TOTP
+  EMAIL
+}
+
+/// Motivo de un código de 6 dígitos enviado por correo.
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  LOGIN_2FA
+  ENABLE_2FA
+}
+
+enum RegistrationStatus {
+  PREREGISTERED
+  CONFIRMED
+  WAITLISTED
+  CANCELLED
+}
+
+/// Canal por el que la inscripción llegó al sistema.
+enum RegistrationOrigin {
+  FORM
+  MANUAL
+  SPEAKER
+  OPEN_REGISTRATION
+  ONSITE
+  IMPORT
+}
+
+enum VirtualAttendanceMode {
+  MANUAL
+  AUTOMATIC
+}
+
+enum SyncStatus {
+  DISABLED
+  PENDING
+  SYNCED
+  ERROR
+}
+
+enum SessionSpeakerRole {
+  SPEAKER
+  CO_SPEAKER
+  MODERATOR
+}
+
+enum NotificationChannel {
+  EMAIL
+  TELEGRAM
+}
+
+enum NotificationStatus {
+  SCHEDULED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+  SKIPPED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum FileScope {
+  MATERIAL
+  DOCUMENT
+}
+
+enum FileVisibility {
+  PUBLIC
+  REGISTERED
+  PRIVATE
+}
+
+enum FileStatus {
+  ACTIVE
+  HIDDEN
+  DELETED
 }
 
 enum RegistrationFormStatus {
@@ -143,41 +232,97 @@ model AuthUser {
   emailVerifiedAt        DateTime?            @map("email_verified_at")
   passwordResetTokenHash String?              @map("password_reset_token_hash")
   passwordResetExpiresAt DateTime?            @map("password_reset_expires_at")
+  /// Secreto TOTP cifrado con AES-256-GCM; existe desde la configuración, se usa al activar.
+  totpSecretEnc          String?              @map("totp_secret_enc")
+  /// Último paso TOTP aceptado: impide reutilizar un código dentro de su ventana.
+  totpLastStep           Int?                 @map("totp_last_step")
+  twoFactorMethod        TwoFactorMethod?     @map("two_factor_method")
+  twoFactorEnabledAt     DateTime?            @map("two_factor_enabled_at")
+  /// Se incrementa al cambiar contraseña, rol o 2FA: invalida los refresh tokens emitidos.
+  sessionVersion         Int                  @default(0) @map("session_version")
+  lastLoginAt            DateTime?            @map("last_login_at")
   createdAt              DateTime             @default(now()) @map("created_at")
   updatedAt              DateTime             @updatedAt @map("updated_at")
   profile                Profile?
   memberships            OrganizationMember[]
+  verificationCodes      VerificationCode[]
+  recoveryCodes          RecoveryCode[]
+  securityEvents         SecurityEvent[]
 
   @@map("auth_users")
 }
 
+/// Código de 6 dígitos enviado por correo. Solo se guarda su HMAC.
+model VerificationCode {
+  id         String              @id @default(uuid()) @db.Uuid
+  accountId  String              @map("account_id") @db.Uuid
+  purpose    VerificationPurpose
+  codeHash   String              @map("code_hash")
+  attempts   Int                 @default(0)
+  expiresAt  DateTime            @map("expires_at")
+  consumedAt DateTime?           @map("consumed_at")
+  createdAt  DateTime            @default(now()) @map("created_at")
+  account    AuthUser            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, purpose, createdAt])
+  @@map("verification_codes")
+}
+
+/// Códigos de recuperación del segundo factor. Un solo uso cada uno.
+model RecoveryCode {
+  id        String    @id @default(uuid()) @db.Uuid
+  accountId String    @map("account_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  account   AuthUser  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+  @@map("recovery_codes")
+}
+
+/// Bitácora de seguridad de la cuenta (accesos, 2FA, contraseña).
+model SecurityEvent {
+  id        String    @id @default(uuid()) @db.Uuid
+  accountId String?   @map("account_id") @db.Uuid
+  action    String
+  ip        String?
+  details   Json?
+  createdAt DateTime  @default(now()) @map("created_at")
+  account   AuthUser? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([accountId, createdAt])
+  @@map("security_events")
+}
+
 model Profile {
-  id                     String               @id @default(uuid()) @db.Uuid
-  authUserId             String?              @unique @map("auth_user_id") @db.Uuid
-  organizationId         String?              @map("organization_id") @db.Uuid
-  firstName              String?              @map("first_name")
-  lastName               String?              @map("last_name")
+  id                     String                  @id @default(uuid()) @db.Uuid
+  authUserId             String?                 @unique @map("auth_user_id") @db.Uuid
+  organizationId         String?                 @map("organization_id") @db.Uuid
+  firstName              String?                 @map("first_name")
+  lastName               String?                 @map("last_name")
   phone                  String?
-  avatarUrl              String?              @map("avatar_url")
+  primaryEmail           String?                 @map("primary_email")
+  avatarUrl              String?                 @map("avatar_url")
   bio                    String?
-  identityDocumentType   String?              @map("identity_document_type")
-  identityDocumentNumber String?              @map("identity_document_number")
-  birthDate              DateTime?            @map("birth_date")
+  identityDocumentType   String?                 @map("identity_document_type")
+  identityDocumentNumber String?                 @map("identity_document_number")
+  birthDate              DateTime?               @map("birth_date")
   sex                    String?
   location               String?
   institution            String?
   dedication             String?
-  researchInterests      String?              @map("research_interests")
-  areasOfInterest        String[]             @default([]) @map("areas_of_interest")
-  expertiseAreas         String[]             @default([]) @map("expertise_areas")
-  socialLinks            Json?                @map("social_links")
-  additionalEmails       Json?                @map("additional_emails")
-  isPublic               Boolean              @default(false) @map("is_public")
-  onboardingCompleted    Boolean              @default(false) @map("onboarding_completed")
-  createdAt              DateTime             @default(now()) @map("created_at")
-  updatedAt              DateTime             @updatedAt @map("updated_at")
-  authUser               AuthUser?            @relation(fields: [authUserId], references: [id], onDelete: SetNull)
-  organization           Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  researchInterests      String?                 @map("research_interests")
+  areasOfInterest        String[]                @default([]) @map("areas_of_interest")
+  expertiseAreas         String[]                @default([]) @map("expertise_areas")
+  socialLinks            Json?                   @map("social_links")
+  additionalEmails       Json?                   @map("additional_emails")
+  isPublic               Boolean                 @default(false) @map("is_public")
+  onboardingCompleted    Boolean                 @default(false) @map("onboarding_completed")
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
+  authUser               AuthUser?               @relation(fields: [authUserId], references: [id], onDelete: SetNull)
+  organization           Organization?           @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   memberships            OrganizationMember[]
   education              Education[]
   employment             EmploymentHistory[]
@@ -185,56 +330,60 @@ model Profile {
   participants           EventParticipant[]
   sessionSpeakers        SessionSpeaker[]
   marketingContacts      MarketingContact[]
+  notificationPreference NotificationPreference?
+  notifications          Notification[]
 
+  @@index([primaryEmail])
+  @@index([identityDocumentType, identityDocumentNumber])
   @@map("profiles")
 }
 
 model Organization {
-  id             String                    @id @default(uuid()) @db.Uuid
-  name           String
-  slug           String                    @unique
-  description    String?
-  organizationType String?                 @map("organization_type")
-  logoUrl        String?                   @map("logo_url")
-  coverUrl       String?                   @map("cover_url")
-  createdAt      DateTime                  @default(now()) @map("created_at")
-  updatedAt      DateTime                  @updatedAt @map("updated_at")
-  isActive       Boolean                   @default(true) @map("is_active")
-  members        OrganizationMember[]
-  profiles       Profile[]
-  branches       OrganizationBranch[]
-  events         MainEvent[]
-  subscription   OrganizationSubscription?
-  emailTemplates EmailTemplate[]
-  emailSections  EmailSection[]
-  emailSettings  OrganizationEmailSettings?
-  marketingContacts MarketingContact[]
-  marketingSegments MarketingSegment[]
-  marketingCampaigns MarketingCampaign[]
-  automations MarketingAutomation[]
-  emailDeliveries EmailDelivery[]
+  id                   String                     @id @default(uuid()) @db.Uuid
+  name                 String
+  slug                 String                     @unique
+  description          String?
+  organizationType     String?                    @map("organization_type")
+  logoUrl              String?                    @map("logo_url")
+  coverUrl             String?                    @map("cover_url")
+  createdAt            DateTime                   @default(now()) @map("created_at")
+  updatedAt            DateTime                   @updatedAt @map("updated_at")
+  isActive             Boolean                    @default(true) @map("is_active")
+  members              OrganizationMember[]
+  profiles             Profile[]
+  branches             OrganizationBranch[]
+  events               MainEvent[]
+  subscription         OrganizationSubscription?
+  emailTemplates       EmailTemplate[]
+  emailSections        EmailSection[]
+  emailSettings        OrganizationEmailSettings?
+  marketingContacts    MarketingContact[]
+  marketingSegments    MarketingSegment[]
+  marketingCampaigns   MarketingCampaign[]
+  automations          MarketingAutomation[]
+  emailDeliveries      EmailDelivery[]
   marketingEnrollments MarketingEventEnrollment[]
-  portal             OrganizationPortal?
-  mediaAssets        MediaAsset[]
+  portal               OrganizationPortal?
+  mediaAssets          MediaAsset[]
 
   @@map("organizations")
 }
 
 model MarketingContact {
-  id              String                 @id @default(uuid()) @db.Uuid
-  organizationId  String                 @map("organization_id") @db.Uuid
-  profileId       String?                @map("profile_id") @db.Uuid
-  emailFallback   String?                @map("email_fallback")
-  consentStatus   MarketingConsentStatus @default(PENDING_CONFIRMATION) @map("consent_status")
-  consentedAt     DateTime?              @map("consented_at")
-  unsubscribedAt  DateTime?              @map("unsubscribed_at")
-  source          String                 @default("MANUAL")
-  tags            String[]               @default([])
-  createdAt       DateTime               @default(now()) @map("created_at")
-  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  profile         Profile?               @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  segmentMembers  MarketingSegmentMember[]
-  enrollments     MarketingEventEnrollment[]
+  id             String                     @id @default(uuid()) @db.Uuid
+  organizationId String                     @map("organization_id") @db.Uuid
+  profileId      String?                    @map("profile_id") @db.Uuid
+  emailFallback  String?                    @map("email_fallback")
+  consentStatus  MarketingConsentStatus     @default(PENDING_CONFIRMATION) @map("consent_status")
+  consentedAt    DateTime?                  @map("consented_at")
+  unsubscribedAt DateTime?                  @map("unsubscribed_at")
+  source         String                     @default("MANUAL")
+  tags           String[]                   @default([])
+  createdAt      DateTime                   @default(now()) @map("created_at")
+  organization   Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  profile        Profile?                   @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  segmentMembers MarketingSegmentMember[]
+  enrollments    MarketingEventEnrollment[]
 
   @@unique([organizationId, profileId])
   @@unique([organizationId, emailFallback])
@@ -243,26 +392,27 @@ model MarketingContact {
 }
 
 model MarketingSegment {
-  id              String                   @id @default(uuid()) @db.Uuid
-  organizationId  String                   @map("organization_id") @db.Uuid
-  name            String
-  description     String?
-  type            String                   @default("MANUAL")
-  rules           Json?
-  createdAt       DateTime                 @default(now()) @map("created_at")
-  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  members         MarketingSegmentMember[]
+  id             String                   @id @default(uuid()) @db.Uuid
+  organizationId String                   @map("organization_id") @db.Uuid
+  name           String
+  description    String?
+  type           String                   @default("MANUAL")
+  rules          Json?
+  createdAt      DateTime                 @default(now()) @map("created_at")
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        MarketingSegmentMember[]
 
   @@unique([organizationId, name])
   @@map("marketing_segments")
 }
 
 model MarketingSegmentMember {
-  segmentId String @map("segment_id") @db.Uuid
-  contactId String @map("contact_id") @db.Uuid
-  addedAt DateTime @default(now()) @map("added_at")
-  segment MarketingSegment @relation(fields:[segmentId], references:[id], onDelete:Cascade)
-  contact MarketingContact @relation(fields:[contactId], references:[id], onDelete:Cascade)
+  segmentId String           @map("segment_id") @db.Uuid
+  contactId String           @map("contact_id") @db.Uuid
+  addedAt   DateTime         @default(now()) @map("added_at")
+  segment   MarketingSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
+  contact   MarketingContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
   @@id([segmentId, contactId])
   @@map("marketing_segment_members")
 }
@@ -322,32 +472,48 @@ model OrganizationBranch {
 }
 
 model MainEvent {
-  id             String              @id @default(uuid()) @db.Uuid
-  organizationId String?             @map("organization_id") @db.Uuid
-  eventName      String              @map("event_name")
-  description    String?
-  status         EventStatus         @default(DRAFT)
-  eventMode      EventMode?          @map("event_mode")
-  startDate      DateTime            @map("start_date")
-  endDate        DateTime?           @map("end_date")
-  coverUrl       String?             @map("cover_url")
-  logoUrl        String?             @map("logo_url")
-  contactEmail   String?             @map("contact_email")
-  whatsappCommunityUrl String?       @map("whatsapp_community_url")
-  venueAddress   String?             @map("venue_address")
-  latitude       Float?
-  longitude      Float?
-  createdAt      DateTime            @default(now()) @map("created_at")
-  updatedAt      DateTime            @updatedAt @map("updated_at")
-  organization   Organization?       @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  editions       Edition[]
-  details        EventDetail?
-  thematicLines  ThematicLine[]
-  setupProgress  EventSetupProgress?
-  contacts       EventContact[]
-  registrationForms RegistrationForm[]
-  automations MarketingAutomation[]
-  marketingEnrollments MarketingEventEnrollment[]
+  id                      String                     @id @default(uuid()) @db.Uuid
+  organizationId          String?                    @map("organization_id") @db.Uuid
+  eventName               String                     @map("event_name")
+  description             String?
+  status                  EventStatus                @default(DRAFT)
+  eventMode               EventMode?                 @map("event_mode")
+  startDate               DateTime                   @map("start_date")
+  endDate                 DateTime?                  @map("end_date")
+  coverUrl                String?                    @map("cover_url")
+  logoUrl                 String?                    @map("logo_url")
+  contactEmail            String?                    @map("contact_email")
+  whatsappCommunityUrl    String?                    @map("whatsapp_community_url")
+  /// MANUAL: el organizador aprueba la asistencia virtual; AUTOMATIC: se importa el reporte de Zoom.
+  virtualAttendanceMode   VirtualAttendanceMode      @default(MANUAL) @map("virtual_attendance_mode")
+  /// Fracción mínima de permanencia (0..1) para que la asistencia virtual sea válida.
+  attendanceThreshold     Float                      @default(0.8) @map("attendance_threshold")
+  /// Aforo por edición; nulo significa sin límite.
+  capacity                Int?
+  waitlistEnabled         Boolean                    @default(false) @map("waitlist_enabled")
+  /// Minutos antes del inicio de cada sesión en que se envía un recordatorio.
+  reminderOffsets         Int[]                      @default([60]) @map("reminder_offsets")
+  /// Crea reunión de Zoom (y registrant por inscrito) para sesiones virtuales.
+  zoomEnabled             Boolean                    @default(false) @map("zoom_enabled")
+  facebookLiveEnabled     Boolean                    @default(false) @map("facebook_live_enabled")
+  /// Replica el evento en el sistema externo de Asistencia (QR presencial).
+  attendanceMirrorEnabled Boolean                    @default(false) @map("attendance_mirror_enabled")
+  venueAddress            String?                    @map("venue_address")
+  latitude                Float?
+  longitude               Float?
+  createdAt               DateTime                   @default(now()) @map("created_at")
+  updatedAt               DateTime                   @updatedAt @map("updated_at")
+  organization            Organization?              @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  editions                Edition[]
+  details                 EventDetail?
+  thematicLines           ThematicLine[]
+  setupProgress           EventSetupProgress?
+  contacts                EventContact[]
+  registrationForms       RegistrationForm[]
+  automations             MarketingAutomation[]
+  marketingEnrollments    MarketingEventEnrollment[]
+  files                   EventFile[]
+  notifications           Notification[]
 
   @@index([organizationId, status])
   @@map("main_events")
@@ -371,15 +537,16 @@ model EventSetupProgress {
 }
 
 model EventContact {
-  id        String   @id @default(uuid()) @db.Uuid
-  eventId   String   @map("event_id") @db.Uuid
+  id        String    @id @default(uuid()) @db.Uuid
+  eventId   String    @map("event_id") @db.Uuid
   name      String
   email     String?
   phone     String?
   role      String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
   event     MainEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
   @@index([eventId])
   @@map("event_contacts")
 }
@@ -398,24 +565,24 @@ model EventDetail {
 }
 
 model Edition {
-  id           String             @id @default(uuid()) @db.Uuid
-  mainEventId  String             @map("main_event_id") @db.Uuid
-  name         String
-  startDate    DateTime?          @map("start_date")
-  endDate      DateTime?          @map("end_date")
-  modality     String?
-  location     String?
-  description  String?
-  coverUrl     String?            @map("cover_url")
-  metaThumbnailUrl String?        @map("meta_thumbnail_url")
-  isCurrent    Boolean            @default(false) @map("is_current")
-  latitude     Float?
-  longitude    Float?
-  createdAt    DateTime           @default(now()) @map("created_at")
-  mainEvent    MainEvent          @relation(fields: [mainEventId], references: [id], onDelete: Cascade)
-  activities   EventActivity[]
-  participants EventParticipant[]
-  tickets      EventTicket[]
+  id                String             @id @default(uuid()) @db.Uuid
+  mainEventId       String             @map("main_event_id") @db.Uuid
+  name              String
+  startDate         DateTime?          @map("start_date")
+  endDate           DateTime?          @map("end_date")
+  modality          String?
+  location          String?
+  description       String?
+  coverUrl          String?            @map("cover_url")
+  metaThumbnailUrl  String?            @map("meta_thumbnail_url")
+  isCurrent         Boolean            @default(false) @map("is_current")
+  latitude          Float?
+  longitude         Float?
+  createdAt         DateTime           @default(now()) @map("created_at")
+  mainEvent         MainEvent          @relation(fields: [mainEventId], references: [id], onDelete: Cascade)
+  activities        EventActivity[]
+  participants      EventParticipant[]
+  tickets           EventTicket[]
   registrationForms RegistrationForm[]
 
   @@index([mainEventId])
@@ -425,16 +592,16 @@ model Edition {
 /// Archivo físico almacenado una única vez. La clave permite borrarlo del proveedor
 /// sin inferirla a partir de la URL pública.
 model MediaAsset {
-  id             String      @id @default(uuid()) @db.Uuid
-  organizationId String?     @map("organization_id") @db.Uuid
-  key            String      @unique
-  url            String      @unique
-  filename       String      @map("file_name")
-  mimeType       String      @map("mime_type")
-  sizeBytes      Int         @map("size_bytes")
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String?          @map("organization_id") @db.Uuid
+  key            String           @unique
+  url            String           @unique
+  filename       String           @map("file_name")
+  mimeType       String           @map("mime_type")
+  sizeBytes      Int              @map("size_bytes")
   orientation    MediaOrientation @default(OTHER)
-  createdAt      DateTime    @default(now()) @map("created_at")
-  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  organization   Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   links          MediaLink[]
 
   @@index([organizationId, createdAt])
@@ -444,15 +611,15 @@ model MediaAsset {
 /// Asociación polimórfica: el mismo archivo se puede reutilizar en una organización,
 /// evento o edición sin duplicar datos ni volver a subirlo.
 model MediaLink {
-  id        String         @id @default(uuid()) @db.Uuid
-  mediaId   String         @map("media_id") @db.Uuid
-  ownerType MediaOwnerType @map("owner_type")
-  ownerId   String         @map("owner_id") @db.Uuid
-  purpose   MediaPurpose   @default(GALLERY)
-  position  Int            @default(0)
-  isFeatured Boolean       @default(false) @map("is_featured")
-  createdAt DateTime       @default(now()) @map("created_at")
-  media     MediaAsset     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  id         String         @id @default(uuid()) @db.Uuid
+  mediaId    String         @map("media_id") @db.Uuid
+  ownerType  MediaOwnerType @map("owner_type")
+  ownerId    String         @map("owner_id") @db.Uuid
+  purpose    MediaPurpose   @default(GALLERY)
+  position   Int            @default(0)
+  isFeatured Boolean        @default(false) @map("is_featured")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  media      MediaAsset     @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
   @@unique([mediaId, ownerType, ownerId, purpose])
   @@index([ownerType, ownerId, purpose, position])
@@ -460,63 +627,66 @@ model MediaLink {
 }
 
 model RegistrationForm {
-  id                    String                     @id @default(uuid()) @db.Uuid
-  mainEventId           String                     @map("main_event_id") @db.Uuid
-  editionId             String?                    @map("edition_id") @db.Uuid
+  id                    String                   @id @default(uuid()) @db.Uuid
+  mainEventId           String                   @map("main_event_id") @db.Uuid
+  editionId             String?                  @map("edition_id") @db.Uuid
   title                 String
   description           String?
-  slug                  String                     @unique
-  status                RegistrationFormStatus     @default(DRAFT)
-  opensAt               DateTime?                  @map("opens_at")
-  closesAt              DateTime?                  @map("closes_at")
-  maxSubmissions        Int?                       @map("max_submissions")
-  approvalMode          String                     @default("MANUAL") @map("approval_mode")
-  purpose               String                     @default("PARTICIPANT")
-  allowEditionSelection Boolean                    @default(false) @map("allow_edition_selection")
-  defaultEditionId      String?                    @map("default_edition_id") @db.Uuid
-  thankYouMessage       String?                    @map("thank_you_message")
-  thankYouRedirectUrl   String?                    @map("thank_you_redirect_url")
-  createdAt             DateTime                   @default(now()) @map("created_at")
-  updatedAt             DateTime                   @updatedAt @map("updated_at")
-  mainEvent             MainEvent                  @relation(fields: [mainEventId], references: [id], onDelete: Cascade)
-  edition               Edition?                   @relation(fields: [editionId], references: [id], onDelete: SetNull)
+  slug                  String                   @unique
+  status                RegistrationFormStatus   @default(DRAFT)
+  opensAt               DateTime?                @map("opens_at")
+  closesAt              DateTime?                @map("closes_at")
+  maxSubmissions        Int?                     @map("max_submissions")
+  approvalMode          String                   @default("MANUAL") @map("approval_mode")
+  purpose               String                   @default("PARTICIPANT")
+  allowEditionSelection Boolean                  @default(false) @map("allow_edition_selection")
+  defaultEditionId      String?                  @map("default_edition_id") @db.Uuid
+  thankYouMessage       String?                  @map("thank_you_message")
+  thankYouRedirectUrl   String?                  @map("thank_you_redirect_url")
+  createdAt             DateTime                 @default(now()) @map("created_at")
+  updatedAt             DateTime                 @updatedAt @map("updated_at")
+  mainEvent             MainEvent                @relation(fields: [mainEventId], references: [id], onDelete: Cascade)
+  edition               Edition?                 @relation(fields: [editionId], references: [id], onDelete: SetNull)
   fields                RegistrationFormField[]
   submissions           RegistrationSubmission[]
   automations           MarketingAutomation[]
+
   @@index([mainEventId])
   @@map("registration_forms")
 }
 
 model RegistrationFormField {
-  id          String           @id @default(uuid()) @db.Uuid
-  formId      String           @map("form_id") @db.Uuid
-  key         String
-  label       String
-  type        String
-  required    Boolean          @default(false)
-  options     Json?
-  validation  Json?
-  position    Int              @default(0)
-  form        RegistrationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  id         String           @id @default(uuid()) @db.Uuid
+  formId     String           @map("form_id") @db.Uuid
+  key        String
+  label      String
+  type       String
+  required   Boolean          @default(false)
+  options    Json?
+  validation Json?
+  position   Int              @default(0)
+  form       RegistrationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
   @@unique([formId, key])
   @@map("registration_form_fields")
 }
 
 model RegistrationSubmission {
-  id              String                     @id @default(uuid()) @db.Uuid
-  formId          String                     @map("form_id") @db.Uuid
-  editionId       String?                    @map("edition_id") @db.Uuid
-  status          RegistrationSubmissionStatus @default(PENDING)
-  email           String?
-  answers         Json
-  profileId       String?                    @map("profile_id") @db.Uuid
-  participantId   String?                    @map("participant_id") @db.Uuid
-  submittedAt     DateTime                   @default(now()) @map("submitted_at")
-  reviewedAt      DateTime?                  @map("reviewed_at")
-  form            RegistrationForm           @relation(fields: [formId], references: [id], onDelete: Cascade)
+  id                  String                       @id @default(uuid()) @db.Uuid
+  formId              String                       @map("form_id") @db.Uuid
+  editionId           String?                      @map("edition_id") @db.Uuid
+  status              RegistrationSubmissionStatus @default(PENDING)
+  email               String?
+  answers             Json
+  profileId           String?                      @map("profile_id") @db.Uuid
+  participantId       String?                      @map("participant_id") @db.Uuid
+  submittedAt         DateTime                     @default(now()) @map("submitted_at")
+  reviewedAt          DateTime?                    @map("reviewed_at")
+  form                RegistrationForm             @relation(fields: [formId], references: [id], onDelete: Cascade)
   marketingEnrollment MarketingEventEnrollment?
-  @@index([formId, status])
+
   @@unique([formId, email])
+  @@index([formId, status])
   @@map("registration_submissions")
 }
 
@@ -534,14 +704,22 @@ model EventActivity {
 }
 
 model EventSession {
-  id            String                @id @default(uuid()) @db.Uuid
-  activityId    String                @map("activity_id") @db.Uuid
-  title         String
-  description   String?
-  activity      EventActivity         @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  speakers      SessionSpeaker[]
-  resources     SessionResource[]
-  thematicLines SessionThematicLine[]
+  id                String                @id @default(uuid()) @db.Uuid
+  activityId        String                @map("activity_id") @db.Uuid
+  title             String
+  description       String?
+  startsAt          DateTime?             @map("starts_at")
+  endsAt            DateTime?             @map("ends_at")
+  /// Nulo hereda la modalidad del evento.
+  modality          EventMode?
+  activity          EventActivity         @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  speakers          SessionSpeaker[]
+  resources         SessionResource[]
+  thematicLines     SessionThematicLine[]
+  attendanceRecords AttendanceRecord[]
+  integration       SessionIntegration?
+  registrations     SessionRegistration[]
+  files             EventFile[]
 
   @@map("event_sessions")
 }
@@ -569,43 +747,130 @@ model SessionResource {
 }
 
 model SessionSpeaker {
-  id        String       @id @default(uuid()) @db.Uuid
-  sessionId String       @map("session_id") @db.Uuid
-  profileId String       @map("profile_id") @db.Uuid
-  session   EventSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  profile   Profile      @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  id        String             @id @default(uuid()) @db.Uuid
+  sessionId String             @map("session_id") @db.Uuid
+  profileId String             @map("profile_id") @db.Uuid
+  role      SessionSpeakerRole @default(SPEAKER)
+  topic     String?
+  session   EventSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  profile   Profile            @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  files     EventFile[]
 
   @@unique([sessionId, profileId])
   @@map("session_speakers")
 }
 
 model EventParticipant {
-  id           String                   @id @default(uuid()) @db.Uuid
-  editionId    String                   @map("edition_id") @db.Uuid
-  profileId    String                   @map("profile_id") @db.Uuid
-  roleId       String?                  @map("role_id") @db.Uuid
-  registeredAt DateTime                 @default(now()) @map("registered_at")
-  checkedIn    Boolean                  @default(false) @map("checked_in")
-  edition      Edition                  @relation(fields: [editionId], references: [id], onDelete: Cascade)
-  profile      Profile                  @relation(fields: [profileId], references: [id], onDelete: Cascade)
-  role         ParticipantRole?         @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  certificates ParticipantCertificate[]
+  id                   String                      @id @default(uuid()) @db.Uuid
+  editionId            String                      @map("edition_id") @db.Uuid
+  profileId            String                      @map("profile_id") @db.Uuid
+  roleId               String?                     @map("role_id") @db.Uuid
+  registeredAt         DateTime                    @default(now()) @map("registered_at")
+  checkedIn            Boolean                     @default(false) @map("checked_in")
+  status               RegistrationStatus          @default(CONFIRMED)
+  origin               RegistrationOrigin          @default(FORM)
+  /// Token propio de la inscripción: enlace único del participante, sin login.
+  accessToken          String                      @unique @default(uuid()) @map("access_token") @db.Uuid
+  confirmedAt          DateTime?                   @map("confirmed_at")
+  cancelledAt          DateTime?                   @map("cancelled_at")
+  edition              Edition                     @relation(fields: [editionId], references: [id], onDelete: Cascade)
+  profile              Profile                     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  role                 ParticipantRole?            @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  certificates         ParticipantCertificate[]
+  roleAssignments      ParticipantRoleAssignment[]
+  attendanceRecords    AttendanceRecord[]
+  sessionRegistrations SessionRegistration[]
+  notifications        Notification[]
 
   @@unique([editionId, profileId])
+  @@index([editionId, status])
   @@map("event_participants")
 }
 
 model ParticipantRole {
-  id          String   @id @default(uuid()) @db.Uuid
-  mainEventId String?  @map("main_event_id") @db.Uuid
-  editionId   String?  @map("edition_id") @db.Uuid
-  name        String
-  createdAt   DateTime @default(now()) @map("created_at")
-  participants EventParticipant[]
+  id                 String                      @id @default(uuid()) @db.Uuid
+  mainEventId        String?                     @map("main_event_id") @db.Uuid
+  editionId          String?                     @map("edition_id") @db.Uuid
+  name               String
+  displayName        String?                     @map("display_name")
+  displayNameEn      String?                     @map("display_name_en")
+  badgeColor         String?                     @map("badge_color")
+  isActive           Boolean                     @default(true) @map("is_active")
+  isSpeaker          Boolean                     @default(false) @map("is_speaker")
+  certificateHours   Int                         @default(0) @map("certificate_hours")
+  requiresAttendance Boolean                     @default(true) @map("requires_attendance")
+  certificateText    String?                     @map("certificate_text")
+  externalTemplateId String?                     @map("external_template_id")
+  createdAt          DateTime                    @default(now()) @map("created_at")
+  participants       EventParticipant[]
+  assignments        ParticipantRoleAssignment[]
+  certificates       ParticipantCertificate[]
 
-  @@index([mainEventId, editionId])
   @@unique([mainEventId, editionId, name])
+  @@index([mainEventId, editionId])
   @@map("participant_roles")
+}
+
+model ParticipantRoleAssignment {
+  participantId        String           @map("participant_id") @db.Uuid
+  roleId               String           @map("role_id") @db.Uuid
+  assignedAt           DateTime         @default(now()) @map("assigned_at")
+  /// Atajo del flujo 04: habilita el certificado de este rol sin asistencia válida.
+  directApprovedAt     DateTime?        @map("direct_approved_at")
+  directApprovedBy     String?          @map("direct_approved_by") @db.Uuid
+  directApprovalReason String?          @map("direct_approval_reason")
+  participant          EventParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  role                 ParticipantRole  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([participantId, roleId])
+  @@map("participant_role_assignments")
+}
+
+enum AttendanceMethod {
+  MANUAL
+  QR
+  ZOOM
+}
+
+model AttendanceRecord {
+  id            String               @id @default(uuid()) @db.Uuid
+  participantId String               @map("participant_id") @db.Uuid
+  sessionId     String?              @map("session_id") @db.Uuid
+  scopeKey      String               @default("EVENT") @map("scope_key")
+  method        AttendanceMethod     @default(MANUAL)
+  source        String               @default("MANUAL_APPROVAL")
+  valid         Boolean              @default(false)
+  minutes       Int?
+  percentage    Float?
+  approvedBy    String?              @map("approved_by") @db.Uuid
+  approvedAt    DateTime?            @map("approved_at")
+  note          String?
+  /// Identificador de la marca en el sistema de origen (Asistencia/Zoom).
+  externalRef   String?              @map("external_ref")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+  participant   EventParticipant     @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  session       EventSession?        @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  audits        AttendanceAudit[]
+  intervals     AttendanceInterval[]
+
+  @@unique([participantId, scopeKey])
+  @@map("attendance_records")
+}
+
+model AttendanceAudit {
+  id            String           @id @default(uuid()) @db.Uuid
+  recordId      String           @map("record_id") @db.Uuid
+  batchId       String           @map("batch_id") @db.Uuid
+  actorId       String           @map("actor_id") @db.Uuid
+  previousValid Boolean?         @map("previous_valid")
+  valid         Boolean
+  note          String?
+  createdAt     DateTime         @default(now()) @map("created_at")
+  record        AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@index([recordId, createdAt])
+  @@map("attendance_audits")
 }
 
 model ThematicLine {
@@ -642,16 +907,32 @@ model CertificateTemplate {
 }
 
 model ParticipantCertificate {
-  id            String                   @id @default(uuid()) @db.Uuid
-  participantId String                   @map("participant_id") @db.Uuid
-  templateId    String?                  @map("template_id") @db.Uuid
-  code          String                   @unique
-  status        CertificateStatus        @default(ISSUED)
-  issuedAt      DateTime                 @default(now()) @map("issued_at")
-  participant   EventParticipant         @relation(fields: [participantId], references: [id], onDelete: Cascade)
-  template      CertificateTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
-  logs          CertificateTrackingLog[]
+  id             String                   @id @default(uuid()) @db.Uuid
+  participantId  String                   @map("participant_id") @db.Uuid
+  templateId     String?                  @map("template_id") @db.Uuid
+  /// Rol certificado. Nulo solo en certificados anteriores a los roles múltiples.
+  roleId         String?                  @map("role_id") @db.Uuid
+  code           String                   @unique
+  status         CertificateStatus        @default(ISSUED)
+  /// Una reemisión conserva la versión anterior como SUPERSEDED.
+  version        Int                      @default(1)
+  /// Clave enviada al sistema de Certificados: repetir la petición no duplica el documento.
+  idempotencyKey String?                  @unique @map("idempotency_key")
+  externalId     String?                  @map("external_id")
+  verifyUrl      String?                  @map("verify_url")
+  hours          Int?
+  attempts       Int                      @default(0)
+  lastError      String?                  @map("last_error")
+  issuedBy       String?                  @map("issued_by") @db.Uuid
+  issuedAt       DateTime                 @default(now()) @map("issued_at")
+  revokedAt      DateTime?                @map("revoked_at")
+  revokedReason  String?                  @map("revoked_reason")
+  participant    EventParticipant         @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  template       CertificateTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  role           ParticipantRole?         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  logs           CertificateTrackingLog[]
 
+  @@index([participantId, roleId, status])
   @@map("participant_certificates")
 }
 
@@ -702,27 +983,27 @@ model Certification {
 }
 
 model EmailTemplate {
-  id                 String              @id @default(uuid()) @db.Uuid
-  organizationId     String              @map("organization_id") @db.Uuid
-  name               String
-  channel            TemplateChannel     @default(EMAIL)
-  status             EmailTemplateStatus @default(DRAFT)
-  subject            String?
-  senderName         String?             @map("sender_name")
-  senderEmail        String?             @map("sender_email")
-  previewText        String?             @map("preview_text")
-  content            Json?
-  htmlContent        String?             @map("html_content") @db.Text
-  category           String?             @default("CUSTOM")
-  thumbnailUrl       String?             @map("thumbnail_url")
-  tags               String[]            @default([])
-  useOrgCredentials  Boolean             @default(true) @map("use_org_credentials")
-  customCredentials  Json?               @map("custom_credentials")
-  sourceTemplateId   String?             @map("source_template_id") @db.Uuid
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
-  organization       Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  automationSteps    MarketingAutomationStep[]
+  id                String                    @id @default(uuid()) @db.Uuid
+  organizationId    String                    @map("organization_id") @db.Uuid
+  name              String
+  channel           TemplateChannel           @default(EMAIL)
+  status            EmailTemplateStatus       @default(DRAFT)
+  subject           String?
+  senderName        String?                   @map("sender_name")
+  senderEmail       String?                   @map("sender_email")
+  previewText       String?                   @map("preview_text")
+  content           Json?
+  htmlContent       String?                   @map("html_content") @db.Text
+  category          String?                   @default("CUSTOM")
+  thumbnailUrl      String?                   @map("thumbnail_url")
+  tags              String[]                  @default([])
+  useOrgCredentials Boolean                   @default(true) @map("use_org_credentials")
+  customCredentials Json?                     @map("custom_credentials")
+  sourceTemplateId  String?                   @map("source_template_id") @db.Uuid
+  createdAt         DateTime                  @default(now()) @map("created_at")
+  updatedAt         DateTime                  @updatedAt @map("updated_at")
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  automationSteps   MarketingAutomationStep[]
 
   @@index([organizationId, channel, status])
   @@map("email_templates")
@@ -742,65 +1023,66 @@ model EmailSection {
   updatedAt      DateTime     @updatedAt @map("updated_at")
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  @@index([organizationId, category])
   @@unique([organizationId, name])
+  @@index([organizationId, category])
   @@map("email_sections")
 }
 
 model OrganizationEmailSettings {
-  id                    String       @id @default(uuid()) @db.Uuid
-  organizationId        String       @unique @map("organization_id") @db.Uuid
-  defaultProvider       String       @default("RESEND") @map("default_provider") // "RESEND" | "GMAIL_SMTP" | "CUSTOM_SMTP"
-  
+  id              String @id @default(uuid()) @db.Uuid
+  organizationId  String @unique @map("organization_id") @db.Uuid
+  defaultProvider String @default("RESEND") @map("default_provider") // "RESEND" | "GMAIL_SMTP" | "CUSTOM_SMTP"
+
   // Resend Settings
-  resendApiKeyEncrypted String?      @map("resend_api_key_encrypted")
-  resendWebhookSecretEncrypted String? @map("resend_webhook_secret_encrypted")
-  resendWebhookId       String?      @map("resend_webhook_id")
-  resendWebhookEndpoint String?      @map("resend_webhook_endpoint")
-  resendWebhookEvents   String[]     @default([]) @map("resend_webhook_events")
-  resendWebhookStatus   String?      @map("resend_webhook_status")
-  resendDomain          String?      @map("resend_domain")
-  resendFromEmail       String?      @map("resend_from_email")
-  resendFromName        String?      @map("resend_from_name")
+  resendApiKeyEncrypted        String?  @map("resend_api_key_encrypted")
+  resendWebhookSecretEncrypted String?  @map("resend_webhook_secret_encrypted")
+  resendWebhookId              String?  @map("resend_webhook_id")
+  resendWebhookEndpoint        String?  @map("resend_webhook_endpoint")
+  resendWebhookEvents          String[] @default([]) @map("resend_webhook_events")
+  resendWebhookStatus          String?  @map("resend_webhook_status")
+  resendDomain                 String?  @map("resend_domain")
+  resendFromEmail              String?  @map("resend_from_email")
+  resendFromName               String?  @map("resend_from_name")
 
   // SMTP / Gmail Settings
-  smtpHost              String?      @map("smtp_host")
-  smtpPort              Int?         @default(587) @map("smtp_port")
-  smtpSecure            Boolean      @default(false) @map("smtp_secure")
-  smtpUser              String?      @map("smtp_user")
-  smtpPassEncrypted     String?      @map("smtp_pass_encrypted")
-  smtpFromEmail         String?      @map("smtp_from_email")
-  smtpFromName          String?      @map("smtp_from_name")
+  smtpHost          String? @map("smtp_host")
+  smtpPort          Int?    @default(587) @map("smtp_port")
+  smtpSecure        Boolean @default(false) @map("smtp_secure")
+  smtpUser          String? @map("smtp_user")
+  smtpPassEncrypted String? @map("smtp_pass_encrypted")
+  smtpFromEmail     String? @map("smtp_from_email")
+  smtpFromName      String? @map("smtp_from_name")
 
   // Verified / configured senders catalog
-  verifiedSenders       Json?        @map("verified_senders")
-  isActive              Boolean      @default(true) @map("is_active")
-  createdAt             DateTime     @default(now()) @map("created_at")
-  updatedAt             DateTime     @updatedAt @map("updated_at")
-  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  verifiedSenders Json?        @map("verified_senders")
+  isActive        Boolean      @default(true) @map("is_active")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@map("organization_email_settings")
 }
 
 model MarketingAutomation {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  eventId String? @map("event_id") @db.Uuid
-  registrationFormId String? @map("registration_form_id") @db.Uuid
-  name String
-  trigger String @default("REGISTRATION_SUBMITTED")
-  status AutomationStatus @default(DRAFT)
-  settings Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Cascade)
-  event MainEvent? @relation(fields:[eventId], references:[id], onDelete:SetNull)
-  registrationForm RegistrationForm? @relation(fields:[registrationFormId], references:[id], onDelete:Cascade)
-  steps MarketingAutomationStep[]
-  enrollments MarketingEventEnrollment[]
+  id                 String                     @id @default(uuid()) @db.Uuid
+  organizationId     String                     @map("organization_id") @db.Uuid
+  eventId            String?                    @map("event_id") @db.Uuid
+  registrationFormId String?                    @map("registration_form_id") @db.Uuid
+  name               String
+  trigger            String                     @default("REGISTRATION_SUBMITTED")
+  status             AutomationStatus           @default(DRAFT)
+  settings           Json?
+  createdAt          DateTime                   @default(now()) @map("created_at")
+  updatedAt          DateTime                   @updatedAt @map("updated_at")
+  organization       Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event              MainEvent?                 @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  registrationForm   RegistrationForm?          @relation(fields: [registrationFormId], references: [id], onDelete: Cascade)
+  steps              MarketingAutomationStep[]
+  enrollments        MarketingEventEnrollment[]
+
+  @@unique([registrationFormId, trigger])
   @@index([organizationId, status])
   @@index([registrationFormId, status])
-  @@unique([registrationFormId, trigger])
   @@map("marketing_automations")
 }
 
@@ -827,88 +1109,95 @@ model OrganizationPortal {
 
 // Campañas puntuales: se conserva para envíos manuales y para no perder datos previos.
 model MarketingCampaign {
-  id String @id @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  name String
-  subject String?
-  status String @default("DRAFT")
-  segmentIds Json @default("[]") @map("segment_ids")
-  settings Json? @map("settings")
-  scheduledAt DateTime? @map("scheduled_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Cascade)
-  deliveries EmailDelivery[]
+  id             String          @id @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  name           String
+  subject        String?
+  status         String          @default("DRAFT")
+  segmentIds     Json            @default("[]") @map("segment_ids")
+  settings       Json?           @map("settings")
+  scheduledAt    DateTime?       @map("scheduled_at")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deliveries     EmailDelivery[]
+
   @@index([organizationId, status])
   @@map("marketing_campaigns")
 }
 
 model MarketingEventEnrollment {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  eventId String @map("event_id") @db.Uuid
-  automationId String @map("automation_id") @db.Uuid
-  contactId String @map("contact_id") @db.Uuid
-  submissionId String? @unique @map("submission_id") @db.Uuid
-  firstName String? @map("first_name")
-  registeredAt DateTime @default(now()) @map("registered_at")
-  attendanceStatus String @default("REGISTERED") @map("attendance_status")
-  purchaseStatus String @default("NONE") @map("purchase_status")
-  benefitUsedAt DateTime? @map("benefit_used_at")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Cascade)
-  event MainEvent @relation(fields:[eventId], references:[id], onDelete:Cascade)
-  automation MarketingAutomation @relation(fields:[automationId], references:[id], onDelete:Cascade)
-  contact MarketingContact @relation(fields:[contactId], references:[id], onDelete:Cascade)
-  submission RegistrationSubmission? @relation(fields:[submissionId], references:[id], onDelete:SetNull)
+  id               String                  @id @default(uuid()) @db.Uuid
+  organizationId   String                  @map("organization_id") @db.Uuid
+  eventId          String                  @map("event_id") @db.Uuid
+  automationId     String                  @map("automation_id") @db.Uuid
+  contactId        String                  @map("contact_id") @db.Uuid
+  submissionId     String?                 @unique @map("submission_id") @db.Uuid
+  firstName        String?                 @map("first_name")
+  registeredAt     DateTime                @default(now()) @map("registered_at")
+  attendanceStatus String                  @default("REGISTERED") @map("attendance_status")
+  purchaseStatus   String                  @default("NONE") @map("purchase_status")
+  benefitUsedAt    DateTime?               @map("benefit_used_at")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
+  organization     Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event            MainEvent               @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  automation       MarketingAutomation     @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  contact          MarketingContact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  submission       RegistrationSubmission? @relation(fields: [submissionId], references: [id], onDelete: SetNull)
+
   @@unique([automationId, contactId])
   @@index([eventId, attendanceStatus, purchaseStatus])
   @@map("marketing_event_enrollments")
 }
 
 model MarketingAutomationStep {
-  id String @id @default(uuid()) @db.Uuid
-  automationId String @map("automation_id") @db.Uuid
-  position Int
-  timing AutomationTiming
-  offsetHours Int @default(0) @map("offset_hours")
-  templateId String? @map("template_id") @db.Uuid
-  subject String?
-  htmlContent String? @map("html_content") @db.Text
-  conditions Json?
-  automation MarketingAutomation @relation(fields:[automationId], references:[id], onDelete:Cascade)
-  template EmailTemplate? @relation(fields:[templateId], references:[id], onDelete:SetNull)
+  id           String              @id @default(uuid()) @db.Uuid
+  automationId String              @map("automation_id") @db.Uuid
+  position     Int
+  timing       AutomationTiming
+  offsetHours  Int                 @default(0) @map("offset_hours")
+  templateId   String?             @map("template_id") @db.Uuid
+  subject      String?
+  htmlContent  String?             @map("html_content") @db.Text
+  conditions   Json?
+  automation   MarketingAutomation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  template     EmailTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+
   @@unique([automationId, position])
   @@map("marketing_automation_steps")
 }
 
 model EmailDelivery {
-  id String @id @default(uuid()) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  automationId String? @map("automation_id") @db.Uuid
-  stepId String? @map("step_id") @db.Uuid
-  campaignId String? @map("campaign_id") @db.Uuid
-  contactId String? @map("contact_id") @db.Uuid
-  recipientEmail String @map("recipient_email")
-  recipientName String? @map("recipient_name")
-  scheduledAt DateTime @map("scheduled_at")
-  sentAt DateTime? @map("sent_at")
-  deliveredAt DateTime? @map("delivered_at")
-  openedAt DateTime? @map("opened_at")
-  clickedAt DateTime? @map("clicked_at")
-  bouncedAt DateTime? @map("bounced_at")
-  complainedAt DateTime? @map("complained_at")
-  openCount Int @default(0) @map("open_count")
-  clickCount Int @default(0) @map("click_count")
-  trackingToken String @unique @default(uuid()) @map("tracking_token") @db.Uuid
-  status DeliveryStatus @default(QUEUED)
-  providerMessageId String? @map("provider_message_id")
-  error String?
-  context Json?
-  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Cascade)
-  campaign MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  trackingEvents EmailTrackingEvent[]
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @map("organization_id") @db.Uuid
+  automationId      String?              @map("automation_id") @db.Uuid
+  stepId            String?              @map("step_id") @db.Uuid
+  campaignId        String?              @map("campaign_id") @db.Uuid
+  contactId         String?              @map("contact_id") @db.Uuid
+  recipientEmail    String               @map("recipient_email")
+  recipientName     String?              @map("recipient_name")
+  scheduledAt       DateTime             @map("scheduled_at")
+  sentAt            DateTime?            @map("sent_at")
+  deliveredAt       DateTime?            @map("delivered_at")
+  openedAt          DateTime?            @map("opened_at")
+  clickedAt         DateTime?            @map("clicked_at")
+  bouncedAt         DateTime?            @map("bounced_at")
+  complainedAt      DateTime?            @map("complained_at")
+  openCount         Int                  @default(0) @map("open_count")
+  clickCount        Int                  @default(0) @map("click_count")
+  trackingToken     String               @unique @default(uuid()) @map("tracking_token") @db.Uuid
+  status            DeliveryStatus       @default(QUEUED)
+  providerMessageId String?              @map("provider_message_id")
+  error             String?
+  /// Intentos de envío; la cola reclama filas con SKIP LOCKED usando locked_at.
+  attempts          Int                  @default(0)
+  lockedAt          DateTime?            @map("locked_at")
+  context           Json?
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  campaign          MarketingCampaign?   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  trackingEvents    EmailTrackingEvent[]
+
   @@unique([stepId, recipientEmail])
   @@index([status, scheduledAt])
   @@index([campaignId, status])
@@ -916,15 +1205,217 @@ model EmailDelivery {
 }
 
 model EmailTrackingEvent {
-  id String @id @default(uuid()) @db.Uuid
-  deliveryId String @map("delivery_id") @db.Uuid
-  type String
-  url String? @db.Text
-  metadata Json?
-  occurredAt DateTime @default(now()) @map("occurred_at")
-  delivery EmailDelivery @relation(fields:[deliveryId], references:[id], onDelete:Cascade)
+  id         String        @id @default(uuid()) @db.Uuid
+  deliveryId String        @map("delivery_id") @db.Uuid
+  type       String
+  url        String?       @db.Text
+  metadata   Json?
+  occurredAt DateTime      @default(now()) @map("occurred_at")
+  delivery   EmailDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
 
   @@index([deliveryId, type])
   @@index([occurredAt])
   @@map("email_tracking_events")
+}
+
+/// Estado de la sesión en cada proveedor externo (Zoom, Facebook Live, Asistencia).
+model SessionIntegration {
+  id                  String       @id @default(uuid()) @db.Uuid
+  sessionId           String       @unique @map("session_id") @db.Uuid
+  zoomMeetingId       String?      @map("zoom_meeting_id")
+  zoomJoinUrl         String?      @map("zoom_join_url")
+  /// URL de anfitrión cifrada: nunca se expone en respuestas públicas.
+  zoomStartUrlEnc     String?      @map("zoom_start_url_enc")
+  zoomRegistrationUrl String?      @map("zoom_registration_url")
+  zoomStatus          SyncStatus   @default(DISABLED) @map("zoom_status")
+  zoomError           String?      @map("zoom_error")
+  zoomEndedAt         DateTime?    @map("zoom_ended_at")
+  facebookLiveId      String?      @map("facebook_live_id")
+  facebookLiveUrl     String?      @map("facebook_live_url")
+  rtmpStreamUrl       String?      @map("rtmp_stream_url")
+  rtmpStreamKeyEnc    String?      @map("rtmp_stream_key_enc")
+  facebookStatus      SyncStatus   @default(DISABLED) @map("facebook_status")
+  facebookError       String?      @map("facebook_error")
+  attendanceEventId   String?      @map("attendance_event_id")
+  attendanceStatus    SyncStatus   @default(DISABLED) @map("attendance_status")
+  attendanceError     String?      @map("attendance_error")
+  attendanceSyncedAt  DateTime?    @map("attendance_synced_at")
+  updatedAt           DateTime     @updatedAt @map("updated_at")
+  session             EventSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([zoomMeetingId])
+  @@map("session_integrations")
+}
+
+/// Registrant de Zoom de un inscrito en una sesión: su enlace único.
+model SessionRegistration {
+  id            String           @id @default(uuid()) @db.Uuid
+  participantId String           @map("participant_id") @db.Uuid
+  sessionId     String           @map("session_id") @db.Uuid
+  registrantId  String?          @map("registrant_id")
+  joinUrl       String?          @map("join_url")
+  status        SyncStatus       @default(PENDING)
+  attempts      Int              @default(0)
+  lastError     String?          @map("last_error")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  participant   EventParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  session       EventSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([participantId, sessionId])
+  @@map("session_registrations")
+}
+
+/// Tramo de conexión importado de Zoom. Los tramos superpuestos se unen antes de sumar minutos.
+model AttendanceInterval {
+  id       String           @id @default(uuid()) @db.Uuid
+  recordId String           @map("record_id") @db.Uuid
+  joinedAt DateTime         @map("joined_at")
+  leftAt   DateTime         @map("left_at")
+  source   String           @default("zoom_report")
+  record   AttendanceRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, joinedAt, leftAt])
+  @@map("attendance_intervals")
+}
+
+/// Trabajo durable contra un sistema externo. Se reclama con SKIP LOCKED y se reintenta con espera creciente.
+model IntegrationJob {
+  id          String    @id @default(uuid()) @db.Uuid
+  kind        String
+  payload     Json
+  /// Evita encolar dos veces la misma operación pendiente.
+  dedupeKey   String?   @unique @map("dedupe_key")
+  status      JobStatus @default(QUEUED)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(6) @map("max_attempts")
+  runAt       DateTime  @default(now()) @map("run_at")
+  lockedAt    DateTime? @map("locked_at")
+  lastError   String?   @map("last_error")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([status, runAt])
+  @@map("integration_jobs")
+}
+
+/// Webhook recibido; la clave única descarta reenvíos del proveedor.
+model WebhookReceipt {
+  id          String    @id @default(uuid()) @db.Uuid
+  provider    String
+  externalId  String    @map("external_id")
+  eventType   String    @map("event_type")
+  payload     Json
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+  error       String?
+
+  @@unique([provider, externalId])
+  @@map("webhook_receipts")
+}
+
+/// Preferencias de recordatorios de una persona del Directorio (separadas del consentimiento de marketing).
+model NotificationPreference {
+  id                String              @id @default(uuid()) @db.Uuid
+  profileId         String              @unique @map("profile_id") @db.Uuid
+  channel           NotificationChannel @default(EMAIL)
+  remindersEnabled  Boolean             @default(true) @map("reminders_enabled")
+  telegramChatId    String?             @map("telegram_chat_id")
+  telegramLinkedAt  DateTime?           @map("telegram_linked_at")
+  /// Token del deep-link del bot; se rota al enlazar.
+  telegramLinkToken String              @unique @default(uuid()) @map("telegram_link_token") @db.Uuid
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+  profile           Profile             @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+/// Confirmaciones y recordatorios de eventos. La clave de idempotencia evita enviar dos veces lo mismo.
+model Notification {
+  id             String               @id @default(uuid()) @db.Uuid
+  profileId      String               @map("profile_id") @db.Uuid
+  participantId  String?              @map("participant_id") @db.Uuid
+  mainEventId    String               @map("main_event_id") @db.Uuid
+  sessionId      String?              @map("session_id") @db.Uuid
+  type           String
+  channel        NotificationChannel?
+  status         NotificationStatus   @default(SCHEDULED)
+  scheduledFor   DateTime             @map("scheduled_for")
+  sentAt         DateTime?            @map("sent_at")
+  attempts       Int                  @default(0)
+  lockedAt       DateTime?            @map("locked_at")
+  lastError      String?              @map("last_error")
+  idempotencyKey String               @unique @map("idempotency_key")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  profile        Profile              @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  participant    EventParticipant?    @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  event          MainEvent            @relation(fields: [mainEventId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([participantId])
+  @@map("notifications")
+}
+
+/// Material de exposición (sesión/expositor) o documento del evento (acta, programa…).
+model EventFile {
+  id               String             @id @default(uuid()) @db.Uuid
+  mainEventId      String             @map("main_event_id") @db.Uuid
+  scope            FileScope
+  sessionId        String?            @map("session_id") @db.Uuid
+  sessionSpeakerId String?            @map("session_speaker_id") @db.Uuid
+  documentType     String?            @map("document_type")
+  title            String
+  visibility       FileVisibility     @default(PRIVATE)
+  status           FileStatus         @default(ACTIVE)
+  currentVersion   Int                @default(1) @map("current_version")
+  createdBy        String?            @map("created_by") @db.Uuid
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  event            MainEvent          @relation(fields: [mainEventId], references: [id], onDelete: Cascade)
+  session          EventSession?      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  speaker          SessionSpeaker?    @relation(fields: [sessionSpeakerId], references: [id], onDelete: SetNull)
+  versions         EventFileVersion[]
+
+  @@index([mainEventId, scope, status])
+  @@index([sessionId])
+  @@map("event_files")
+}
+
+/// Cada reemplazo crea una versión; el binario vive en el storage, aquí solo la clave.
+model EventFileVersion {
+  id         String    @id @default(uuid()) @db.Uuid
+  fileId     String    @map("file_id") @db.Uuid
+  version    Int
+  storageKey String    @map("storage_key")
+  fileName   String    @map("file_name")
+  mimeType   String    @map("mime_type")
+  size       Int
+  sha256     String
+  uploadedBy String?   @map("uploaded_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+  file       EventFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+
+  @@unique([fileId, version])
+  @@map("event_file_versions")
+}
+
+/// Posible duplicado del Directorio: la inscripción sigue con un perfil provisional
+/// y un administrador decide si fusionarlo con una persona existente.
+model DirectoryReview {
+  id                   String    @id @default(uuid()) @db.Uuid
+  organizationId       String?   @map("organization_id") @db.Uuid
+  reason               String
+  /// Perfil creado para no bloquear la inscripción.
+  provisionalProfileId String    @map("provisional_profile_id") @db.Uuid
+  candidateProfileIds  String[]  @map("candidate_profile_ids") @db.Uuid
+  submitted            Json
+  status               String    @default("OPEN")
+  resolution           String?
+  resolvedBy           String?   @map("resolved_by") @db.Uuid
+  resolvedAt           DateTime? @map("resolved_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+
+  @@index([status, createdAt])
+  @@index([organizationId, status])
+  @@map("directory_reviews")
 }
