@@ -1,20 +1,53 @@
-FROM node:22-alpine AS build
-WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY apps/api/package.json ./apps/api/package.json
-RUN corepack enable && pnpm install --frozen-lockfile=false
-COPY apps/api ./apps/api
-WORKDIR /app/apps/api
-RUN pnpm install --filter events-api --no-frozen-lockfile
-RUN pnpm --filter events-api exec prisma generate --schema prisma/schema.prisma && pnpm --filter events-api build && pnpm deploy --filter events-api /prod && PRISMA_CLIENT_DIR=$(find /app/node_modules -type d -path '*/.prisma/client' | head -n 1) && mkdir -p /prod/node_modules/.prisma && cp -r "$PRISMA_CLIENT_DIR" /prod/node_modules/.prisma/client
+# syntax=docker/dockerfile:1.7
+# API NestJS + Prisma. Etapas: dev (recarga en caliente), migrate (migraciones) y runtime (producción/staging).
+# Contexto de build: raíz del monorepo.
+ARG NODE_IMAGE=node:24-alpine
 
-FROM node:22-alpine
-WORKDIR /app/apps/api
-COPY --from=build /prod ./
-COPY --from=build /app/apps/api/dist ./dist
-COPY --from=build /app/apps/api/prisma ./prisma
+FROM ${NODE_IMAGE} AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH CI=true
+# openssl: motor de Prisma en Alpine. corepack: pnpm en la versión fijada por packageManager.
+RUN apk add --no-cache openssl libc6-compat && corepack enable
+WORKDIR /repo
+
+# Solo manifiestos: la capa de dependencias se reutiliza mientras no cambie el lockfile.
+FROM base AS deps
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/api/package.json apps/api/
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm install --frozen-lockfile --filter events-api
+
+FROM deps AS dev
+COPY apps/api apps/api
+WORKDIR /repo/apps/api
+RUN pnpm exec prisma generate
 EXPOSE 3000
-# El proyecto existente fue inicializado con db push y no tiene tabla de historial
-# de migraciones en instalaciones anteriores. Sincronizar antes de iniciar evita
-# que una versión nueva consulte columnas aún inexistentes en producción.
-CMD ["sh", "-c", "./node_modules/.bin/prisma db push --schema prisma/schema.prisma --accept-data-loss --skip-generate && node dist/main.js"]
+CMD ["pnpm", "exec", "tsx", "watch", "src/main.ts"]
+
+FROM deps AS build
+COPY apps/api apps/api
+WORKDIR /repo/apps/api
+RUN pnpm exec prisma generate && pnpm build
+
+# Tiene la CLI de Prisma (devDependency): se ejecuta una vez antes de la API.
+FROM build AS migrate
+CMD ["node", "scripts/migrate-deploy.mjs"]
+
+# Copia aislada con dependencias de producción y el cliente Prisma ya generado.
+FROM build AS deploy
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
+    pnpm --filter events-api deploy --prod /prod/api \
+ && CLIENT="$(find /repo/node_modules/.pnpm -type d -path '*/node_modules/.prisma/client' | head -n 1)" \
+ && STUB_DIR="$(dirname "$(dirname "$(readlink -f /prod/api/node_modules/@prisma/client)")")/.prisma" \
+ # pnpm deploy deja un cliente «stub» junto a @prisma/client; se reemplaza por el generado.
+ && rm -rf "$STUB_DIR/client" && mkdir -p "$STUB_DIR" && cp -r "$CLIENT" "$STUB_DIR/client" \
+ && rm -rf /prod/api/src /prod/api/test /prod/api/scripts /prod/api/prisma.config.ts /prod/api/tsconfig.json
+
+FROM ${NODE_IMAGE} AS runtime
+RUN apk add --no-cache openssl tini
+ENV NODE_ENV=production PORT=3000
+WORKDIR /app
+COPY --from=deploy --chown=node:node /prod/api ./
+USER node
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD wget -qO- "http://127.0.0.1:${PORT}/api/health" >/dev/null || exit 1
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/main.js"]

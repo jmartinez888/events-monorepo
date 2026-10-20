@@ -20,7 +20,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     env_file:
-      - apps/api/.env
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://events:events@postgres:5432/events?schema=public
       PORT: 3000

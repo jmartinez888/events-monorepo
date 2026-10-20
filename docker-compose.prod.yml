@@ -1,0 +1,100 @@
+# Producción en Dokploy. Las variables se pegan en la pestaña «Environment» del
+# proyecto: Dokploy las guarda como .env junto a este archivo.
+# Dominios: se asignan en la pestaña «Domains» a los servicios api (3000),
+# panel (80) y portal (4321). Traefik los alcanza por dokploy-network.
+name: eventos-prod
+
+x-build: &build
+  context: .
+
+services:
+  eventos-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - eventos-prod-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  migrate:
+    build:
+      <<: *build
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    env_file: ["${ENV_FILE:-.env}"]
+    restart: "no"
+    depends_on:
+      eventos-db:
+        condition: service_healthy
+    networks: [internal]
+
+  api:
+    build:
+      <<: *build
+      dockerfile: apps/api/Dockerfile
+      target: runtime
+    env_file: ["${ENV_FILE:-.env}"]
+    environment:
+      PORT: 3000
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    expose: ["3000"]
+    networks:
+      internal:
+        # Alias único: en dokploy-network puede haber otros servicios llamados «api».
+        aliases: [eventos-api]
+      dokploy-network:
+    deploy:
+      resources:
+        limits: { memory: 768M }
+
+  panel:
+    build:
+      <<: *build
+      dockerfile: apps/panel-admin/Dockerfile
+      target: runtime
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        VITE_COOKIE_SECRET: ${VITE_COOKIE_SECRET}
+    restart: unless-stopped
+    expose: ["80"]
+    networks: [dokploy-network]
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
+  portal:
+    build:
+      <<: *build
+      dockerfile: apps/events-portal/Dockerfile
+      target: runtime
+      args:
+        PUBLIC_API_URL: ${PUBLIC_API_URL}
+    environment:
+      # El render del servidor llama a la API por la red interna.
+      INTERNAL_API_URL: http://eventos-api:3000/api
+    restart: unless-stopped
+    depends_on: [api]
+    expose: ["4321"]
+    networks: [internal, dokploy-network]
+    deploy:
+      resources:
+        limits: { memory: 384M }
+
+networks:
+  internal:
+  dokploy-network:
+    external: true
+
+volumes:
+  eventos-prod-db:

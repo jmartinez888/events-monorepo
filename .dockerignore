@@ -1,6 +1,27 @@
+# Dependencias y salidas de build: se generan dentro de la imagen.
 node_modules
 **/node_modules
+**/dist
+**/.turbo
+**/.next
+apps/events-portal/.astro
+
+# Secretos y datos locales: nunca dentro de una imagen.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+apps/api/storage
+
+# Fuera del alcance de las imágenes.
 .git
-.turbo
 .docker-temp
 backups
+docs
+apps/docs
+apps/api/test
+**/*.log
+.claude
+.agents

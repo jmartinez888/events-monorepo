@@ -1,0 +1,82 @@
+# Desarrollo local con recarga en caliente: docker compose -f docker-compose.dev.yml up --build
+# Usa el .env de la raíz. Puertos 3010/5433 para no chocar con otros proyectos en 3000/5432.
+name: eventos-dev
+
+services:
+  eventos-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: events
+      POSTGRES_USER: events
+      POSTGRES_PASSWORD: events
+    ports: ["127.0.0.1:5433:5432"]
+    volumes:
+      - eventos-dev-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U events -d events"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: migrate
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql://events:events@eventos-db:5432/events?schema=public
+    depends_on:
+      eventos-db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://events:events@eventos-db:5432/events?schema=public
+      STORAGE_LOCAL_DIR: /data/storage
+    ports: ["127.0.0.1:3010:3000"]
+    volumes:
+      - ./apps/api/src:/repo/apps/api/src
+      - eventos-dev-storage:/data/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  panel:
+    build:
+      context: .
+      dockerfile: apps/panel-admin/Dockerfile
+      target: dev
+    environment:
+      VITE_API_URL: http://localhost:3010/api
+    ports: ["127.0.0.1:5173:5173"]
+    volumes:
+      - ./apps/panel-admin/src:/repo/apps/panel-admin/src
+
+  portal:
+    build:
+      context: .
+      dockerfile: apps/events-portal/Dockerfile
+      target: dev
+    environment:
+      PUBLIC_API_URL: http://localhost:3010/api
+      INTERNAL_API_URL: http://api:3000/api
+    ports: ["127.0.0.1:4321:4321"]
+    volumes:
+      - ./apps/events-portal/src:/repo/apps/events-portal/src
+    depends_on: [api]
+
+volumes:
+  eventos-dev-db:
+  eventos-dev-storage:
