@@ -248,7 +248,9 @@ export const emailTemplates = {
       content,
     });
 
-    const text = `Hola ${name},\n\n${data.title}\n\n${data.message}\n${
+    // El texto plano incluye los detalles: algunos clientes solo muestran esta versión (p. ej. el código).
+    const details = (data.details ?? []).map((item) => `${item.label}: ${item.value}`).join('\n');
+    const text = `${data.recipientName ? `Hola ${name}` : 'Hola'},\n\n${data.title}\n\n${data.message}\n${details ? `\n${details}\n` : ''}${
       data.actionUrl ? `\nAcción: ${data.actionUrl}` : ''
     }`;
 

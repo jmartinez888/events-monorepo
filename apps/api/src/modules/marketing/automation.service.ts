@@ -4,6 +4,8 @@ import { MailService } from '../mail/mail.service.js';
 import { blocksToHtml, interpolate } from './email-renderer.js';
 import { EmailTrackingService } from './email-tracking.service.js';
 
+const MAX_DELIVERY_ATTEMPTS = 3;
+
 @Injectable()
 export class AutomationService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AutomationService.name);
@@ -148,21 +150,35 @@ export class AutomationService implements OnModuleInit, OnModuleDestroy {
   }
 
   async dispatchDue(limit = 100) {
-    const jobs = await this.prisma.emailDelivery.findMany({ where: { status: 'QUEUED', scheduledAt: { lte: new Date() } }, take: limit, orderBy: { scheduledAt: 'asc' } });
+    // Reclamación atómica: varias instancias no envían el mismo correo. Un bloqueo de más de
+    // 10 minutos se considera abandonado (proceso caído) y se vuelve a reclamar.
+    const claimed = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE email_deliveries SET locked_at = now(), attempts = attempts + 1
+      WHERE id IN (
+        SELECT id FROM email_deliveries
+        WHERE status = 'QUEUED' AND scheduled_at <= now() AND (locked_at IS NULL OR locked_at < now() - interval '10 minutes')
+        ORDER BY scheduled_at
+        LIMIT ${limit}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id`;
+    const jobs = claimed.length ? await this.prisma.emailDelivery.findMany({ where: { id: { in: claimed.map((item) => item.id) } }, orderBy: { scheduledAt: 'asc' } }) : [];
     let sent = 0; let failed = 0; let skipped = 0;
     for (const job of jobs) {
-      if (!job.stepId || !job.automationId) { await this.prisma.emailDelivery.update({ where: { id: job.id }, data: { status: 'SKIPPED', error: 'Entrega sin automatización asociada' } }); skipped++; continue; }
+      if (!job.stepId || !job.automationId) { await this.prisma.emailDelivery.update({ where: { id: job.id }, data: { status: 'SKIPPED', error: 'Entrega sin automatización asociada', lockedAt: null } }); skipped++; continue; }
       const step = await this.prisma.marketingAutomationStep.findUnique({ where: { id: job.stepId } });
       const enrollment = job.contactId ? await this.prisma.marketingEventEnrollment.findUnique({ where: { automationId_contactId: { automationId: job.automationId, contactId: job.contactId } } }) : null;
       const contact = job.contactId ? await this.prisma.marketingContact.findUnique({ where: { id: job.contactId }, select: { consentStatus: true } }) : null;
-      if (!step || contact?.consentStatus === 'UNSUBSCRIBED' || enrollment?.purchaseStatus === 'PURCHASED' || enrollment?.benefitUsedAt) { await this.prisma.emailDelivery.update({ where: { id: job.id }, data: { status: 'SKIPPED', error: 'No cumple las condiciones de envío' } }); skipped++; continue; }
+      if (!step || contact?.consentStatus === 'UNSUBSCRIBED' || enrollment?.purchaseStatus === 'PURCHASED' || enrollment?.benefitUsedAt) { await this.prisma.emailDelivery.update({ where: { id: job.id }, data: { status: 'SKIPPED', error: 'No cumple las condiciones de envío', lockedAt: null } }); skipped++; continue; }
       const template = step.templateId ? await this.prisma.emailTemplate.findUnique({ where: { id: step.templateId } }) : null;
       const context = (job.context as Record<string, unknown> | null) || {};
       const subject = interpolate(step.subject || template?.subject || 'Información importante', context);
       const configuredHtml = step.htmlContent ? interpolate(step.htmlContent, context) : template?.htmlContent ? interpolate(template.htmlContent, context) : blocksToHtml(template?.content, context);
       const html = this.tracking.decorateHtml(configuredHtml?.trim() ? configuredHtml : this.registrationFallbackHtml(context), job.trackingToken);
       const result = await this.mail.send({ to: job.recipientEmail, subject, html, organizationId: job.organizationId });
-      await this.prisma.emailDelivery.update({ where: { id: job.id }, data: result.sent ? { status: 'SENT', sentAt: new Date(), providerMessageId: result.messageId } : { status: 'FAILED', error: result.reason } });
+      // Fallos transitorios se reintentan con espera creciente; al tercer intento quedan en FAILED.
+      const retry = !result.sent && job.attempts < MAX_DELIVERY_ATTEMPTS;
+      await this.prisma.emailDelivery.update({ where: { id: job.id }, data: result.sent ? { status: 'SENT', sentAt: new Date(), providerMessageId: result.messageId, lockedAt: null, error: null } : retry ? { error: result.reason, lockedAt: null, scheduledAt: new Date(Date.now() + 2 ** job.attempts * 5 * 60_000) } : { status: 'FAILED', error: result.reason, lockedAt: null } });
       result.sent ? sent++ : failed++;
     }
     return { processed: jobs.length, sent, failed, skipped };

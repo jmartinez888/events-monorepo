@@ -4,10 +4,12 @@ import { parsePeruDateTime } from '../../common/peru-time.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import { AutomationService } from '../marketing/automation.service.js';
 import { MailService } from '../mail/mail.service.js';
+import { RegistrationsService } from '../registrations/registrations.service.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 
 @Injectable()
 export class RegistrationFormsService {
-  constructor(private readonly prisma: PrismaService, private readonly automations: AutomationService, private readonly mail: MailService) {}
+  constructor(private readonly prisma: PrismaService, private readonly automations: AutomationService, private readonly mail: MailService, private readonly registrations: RegistrationsService, private readonly notifications: NotificationsService) {}
 
   list(eventId: string) {
     return this.prisma.registrationForm.findMany({
@@ -63,7 +65,15 @@ export class RegistrationFormsService {
     const membership = actor.accountId && organizationId ? await this.prisma.organizationMember.findFirst({ where: { organizationId, accountId: actor.accountId, role: { in: ['OWNER', 'ADMIN'] } } }) : null;
     if (!isGlobalAdmin && !membership) throw new ForbiddenException('Solo un administrador de la organización puede eliminar inscripciones.');
     return this.prisma.$transaction(async (tx) => {
-      if (submission.participantId) await tx.eventParticipant.delete({ where: { id: submission.participantId } });
+      if (submission.participantId) {
+        const participant = await tx.eventParticipant.findUnique({ where: { id: submission.participantId }, select: { edition: { select: { mainEventId: true } } } });
+        if (participant) await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`event-operations:${participant.edition.mainEventId}`}, 0))::text`;
+      }
+      if (submission.participantId) {
+        if (await tx.attendanceRecord.count({ where: { participantId: submission.participantId } }) || await tx.participantCertificate.count({ where: { participantId: submission.participantId } })) throw new BadRequestException('No se puede eliminar una inscripción con historial de asistencia o certificados');
+        const linked = await tx.registrationSubmission.count({ where: { participantId: submission.participantId, id: { not: id } } });
+        if (!linked) await tx.eventParticipant.delete({ where: { id: submission.participantId } });
+      }
       return tx.registrationSubmission.delete({ where: { id } });
     });
   }
@@ -71,7 +81,6 @@ export class RegistrationFormsService {
   async create(eventId: string, data: any) {
     const purpose = data.purpose || 'PARTICIPANT';
     if (purpose === 'MAIN') {
-      await this.ensureMainFormRoles(eventId);
       const mainForm = await this.prisma.registrationForm.findFirst({ where: { mainEventId: eventId, purpose: 'MAIN', status: { not: 'ARCHIVED' } } });
       if (mainForm) throw new BadRequestException('Este evento ya cuenta con un formulario de registro principal');
     }
@@ -122,7 +131,6 @@ export class RegistrationFormsService {
     delete clean.fields;
     if (clean.purpose === 'MAIN') {
       const form = await this.prisma.registrationForm.findUnique({ where: { id }, select: { mainEventId: true } });
-      if (form) await this.ensureMainFormRoles(form.mainEventId);
       const mainForm = form && await this.prisma.registrationForm.findFirst({ where: { mainEventId: form.mainEventId, purpose: 'MAIN', status: { not: 'ARCHIVED' }, id: { not: id } } });
       if (mainForm) throw new BadRequestException('Este evento ya cuenta con un formulario de registro principal');
     }
@@ -197,18 +205,18 @@ export class RegistrationFormsService {
 
   async submit(slug: string, answers: Record<string, unknown>, editionId?: string) {
     const form = await this.publicForm(slug);
-    const count = await this.prisma.registrationSubmission.count({ where: { formId: form.id } });
-    if (form.maxSubmissions && count >= form.maxSubmissions) {
-      throw new BadRequestException('Se alcanzó el límite de registros');
-    }
     for (const field of form.fields) {
-      if (field.required && (answers[field.key] === undefined || answers[field.key] === '')) {
+      if (field.required && (answers[field.key] === undefined || answers[field.key] === null || (typeof answers[field.key] === 'string' && !String(answers[field.key]).trim()))) {
         throw new BadRequestException(`El campo ${field.label} es obligatorio`);
       }
     }
     const emailField = form.fields.find((field: any) => field.type === 'email' || field.key === 'email');
     const emailValue = emailField ? answers[emailField.key] : answers.email;
     const email = typeof emailValue === 'string' ? emailValue.trim().toLowerCase() : null;
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadRequestException('Correo electrónico inválido');
+    const requestedEditionId = editionId || form.editionId || form.defaultEditionId || undefined;
+    if (requestedEditionId && !await this.prisma.edition.findFirst({ where: { id: requestedEditionId, mainEventId: form.mainEventId }, select: { id: true } })) throw new BadRequestException('La edición no pertenece al evento');
+    if (editionId && !form.allowEditionSelection && editionId !== (form.editionId || form.defaultEditionId)) throw new BadRequestException('Este formulario no permite elegir otra edición');
     if (email) {
       const existing = await this.prisma.registrationSubmission.findUnique({
         where: { formId_email: { formId: form.id, email } },
@@ -217,51 +225,55 @@ export class RegistrationFormsService {
       if (existing) throw new BadRequestException('Este correo ya está registrado en este formulario');
     }
     let submission;
+    let registered: { participantId: string; status: string; accessToken: string; reviewId: string | null } | undefined;
     try {
-      submission = await this.prisma.registrationSubmission.create({
+      submission = await this.prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`registration-form:${form.id}`}, 0))::text`;
+        const count = await tx.registrationSubmission.count({ where: { formId: form.id } });
+        if (form.maxSubmissions && count >= form.maxSubmissions) throw new BadRequestException('Se alcanzó el límite de registros');
+        const registration = form.purpose === 'MAIN' ? await this.registerMainParticipant(tx, form, answers, requestedEditionId) : undefined;
+        if (registration) registered = registration;
+        return tx.registrationSubmission.create({
         data: {
           formId: form.id,
-          editionId: editionId || form.editionId || form.defaultEditionId || null,
+          editionId: registration?.editionId || requestedEditionId || null,
+          participantId: registration?.participantId,
+          profileId: registration?.profileId,
           answers: answers as Prisma.InputJsonValue,
           email,
           status: form.approvalMode === 'AUTOMATIC' ? 'APPROVED' : 'PENDING',
         },
-      });
+        });
+      }, { timeout: 20_000 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new BadRequestException('Este correo ya está registrado en este formulario');
       }
       throw error;
     }
-    if (form.purpose === 'MAIN') {
-      const registration = await this.registerMainParticipant(form, submission.id, answers, editionId);
-      await this.prisma.registrationSubmission.update({ where: { id: submission.id }, data: registration });
-    }
     const firstName = [answers.first_name, answers.firstName, answers.name, answers.nombres, answers.nombres_completos].find((value) => typeof value === 'string') as string | undefined;
     const lastName = [answers.last_name, answers.lastName, answers.apellidos].find((value) => typeof value === 'string') as string | undefined;
     await this.automations.enrollRegistration({ eventId: form.mainEventId, registrationFormId: form.id, editionId: editionId || form.editionId || form.defaultEditionId || undefined, submissionId: submission.id, email, firstName, lastName, registeredAt: submission.submittedAt });
     const hasWelcomeTemplate = await this.prisma.marketingAutomation.count({ where: { registrationFormId: form.id, trigger: 'REGISTRATION_SUBMITTED', status: 'ACTIVE', steps: { some: { templateId: { not: null } } } } });
-    if (email && form.mainEvent.organizationId && !hasWelcomeTemplate) {
-      const name = firstName || 'participante';
-      const eventName = form.mainEvent.eventName;
+    if (registered) {
+      // Una plantilla de bienvenida activa ya confirma por correo; los recordatorios se programan igual.
+      await this.registrations.afterCommit(registered.participantId, { notify: !hasWelcomeTemplate });
+      if (hasWelcomeTemplate) await this.notifications.scheduleForParticipant(registered.participantId, { skipImmediate: true });
+    } else if (email && form.mainEvent.organizationId && !hasWelcomeTemplate) {
       const scheduledAt = form.edition?.startDate || form.mainEvent.startDate;
-      const eventDate = scheduledAt.toLocaleString('es-PE', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Lima' });
-      const isMedmind = form.mainEvent.organization?.name?.trim().toLowerCase() === 'medmind';
-      const logo = isMedmind
-        ? '<img src="https://medmind.com.pe/assets/brands/logo_medmind.svg" alt="MedMind" width="150" style="display:block;width:150px;height:auto;margin:0 auto;filter:brightness(0) invert(1)"/>'
-        : form.mainEvent.organization?.logoUrl
-          ? `<img src="${form.mainEvent.organization.logoUrl}" alt="" style="max-height:42px;margin-bottom:20px"/>`
-          : '';
-      const whatsapp = form.mainEvent.whatsappCommunityUrl ? `<p style="margin:26px 0;text-align:center"><a href="${form.mainEvent.whatsappCommunityUrl}" style="display:inline-block;background:#00a98f;color:#fff;padding:14px 22px;border-radius:8px;text-decoration:none;font-weight:700">QUIERO UNIRME A LA COMUNIDAD</a></p>` : '';
-      void this.mail.send({ organizationId: form.mainEvent.organizationId, to: email, subject: `Inscripción confirmada · ${eventName}`, html: `<div style="font-family:Arial,sans-serif;background:#f3f5f5;padding:32px 12px"><div style="max-width:750px;margin:auto;background:#fff"><div style="background:#16b8aa;padding:26px;text-align:center">${logo || '<span style="color:#fff;font-size:38px;font-weight:700">MedMind</span>'}</div><div style="padding:46px 52px;color:#4b4b4b;font-size:18px;line-height:1.72"><h1 style="font-size:26px;margin:0 0 24px;color:#333">¡Hola, ${name} 👋!</h1><p style="margin:0 0 22px">Tu registro para <strong>${eventName}</strong> está confirmado.</p><div style="margin:30px 0;padding:17px;background:#f2fbf9;border-radius:8px"><strong>${eventName}</strong><br/><span style="color:#65727a">${eventDate} (hora de Perú)</span></div>${whatsapp}<p style="margin:28px 0 0">Nos vemos pronto.</p><p style="margin:8px 0 0"><strong>Equipo ${form.mainEvent.organization?.name || 'MedMind'}</strong></p></div></div></div>` });
+      void this.mail.sendNotification(email, {
+        recipientName: firstName,
+        title: `Registro recibido · ${form.mainEvent.eventName}`,
+        message: `Recibimos tu registro en «${form.title}».`,
+        details: [{ label: 'Evento', value: form.mainEvent.eventName }, { label: 'Fecha', value: `${scheduledAt.toLocaleString('es-PE', { dateStyle: 'long', timeStyle: 'short', timeZone: 'America/Lima' })} (hora de Perú)` }],
+      }, form.mainEvent.organizationId);
     }
-    return { ...submission, mainEventId: form.mainEventId, thankYouMessage: form.thankYouMessage, thankYouRedirectUrl: form.thankYouRedirectUrl };
+    return { ...submission, mainEventId: form.mainEventId, thankYouMessage: form.thankYouMessage, thankYouRedirectUrl: form.thankYouRedirectUrl, registration: registered ? { status: registered.status, accessToken: registered.accessToken, needsReview: !!registered.reviewId } : null };
   }
 
   async makeMain(id: string) {
     const form = await this.prisma.registrationForm.findUnique({ where: { id } });
     if (!form) throw new NotFoundException('Formulario no encontrado');
-    await this.ensureMainFormRoles(form.mainEventId);
     const existing = await this.prisma.registrationForm.findFirst({ where: { mainEventId: form.mainEventId, purpose: 'MAIN', status: { not: 'ARCHIVED' }, id: { not: id } } });
     if (existing) throw new BadRequestException('Ya existe otro formulario principal activo para este evento');
     const fields = await this.mainRegistrationFields(form.mainEventId, form.title);
@@ -281,35 +293,27 @@ export class RegistrationFormsService {
       { key: 'first_name', label: 'Nombres', type: 'text', required: true, options: { helpText: 'Nombres completos del participante.' } },
       { key: 'last_name', label: 'Apellidos', type: 'text', required: true, options: { helpText: 'Apellidos completos del participante.' } },
       { key: 'email', label: 'Correo Electrónico', type: 'email', required: true, options: { helpText: 'Dirección de correo electrónico única del participante.' } },
-      { key: 'document_type', label: 'Identificación', type: 'select', required: false, options: ['Ninguno', 'DNI', 'RUC', 'Otros'] },
+      { key: 'document_type', label: 'Identificación', type: 'select', required: false, options: ['Ninguno', 'DNI', 'CE', 'RUC', 'Otros'] },
       { key: 'document_number', label: 'Número de identificación', type: 'text', required: false, options: { helpText: 'Tipo y número del documento nacional de identidad.' } },
     ];
   }
 
-  private async ensureMainFormRoles(eventId: string) {
-    const roles = await this.prisma.participantRole.findMany({ where: { mainEventId: eventId }, select: { name: true } });
-    if (!roles.some((role) => /ponente|speaker/i.test(role.name))) {
-      throw new BadRequestException('Antes de crear el registro principal debes crear el rol “Ponente” en Roles de participantes');
-    }
-  }
-
-  private async registerMainParticipant(form: any, submissionId: string, answers: Record<string, unknown>, requestedEditionId?: string) {
+  private async registerMainParticipant(tx: Prisma.TransactionClient, form: any, answers: Record<string, unknown>, requestedEditionId?: string) {
     const emailField = form.fields?.find((field: any) => field.type === 'email' || field.key === 'email');
     const emailValue = emailField ? answers[emailField.key] : answers.email;
     const email = typeof emailValue === 'string' ? emailValue.trim().toLowerCase() : '';
     if (!email) throw new BadRequestException('El correo electrónico es obligatorio');
     const fullName = String(answers.full_name || answers.name || '').trim();
     const firstName = String(answers.first_name || answers.firstName || answers.nombres || answers.nombres_completos || fullName.split(/\s+/)[0] || 'Participante').trim();
-    const lastNameParts = String(answers.last_name || answers.lastName || answers.apellidos || answers.surname || fullName.split(/\s+/).slice(1).join(' ')).trim().split(/\s+/).filter(Boolean);
-    const selectedEdition = requestedEditionId || form.editionId;
-    return this.prisma.$transaction(async (tx) => {
-      let edition = selectedEdition ? await tx.edition.findFirst({ where: { id: selectedEdition, mainEventId: form.mainEventId } }) : await tx.edition.findFirst({ where: { mainEventId: form.mainEventId }, orderBy: { createdAt: 'asc' } });
-      if (!edition) edition = await tx.edition.create({ data: { mainEventId: form.mainEventId, name: 'Edición Principal' } });
-      let role = await tx.participantRole.findFirst({ where: { mainEventId: form.mainEventId, name: { equals: 'participant', mode: 'insensitive' } } });
-      if (!role) role = await tx.participantRole.create({ data: { mainEventId: form.mainEventId, name: 'participant' } });
-      const profile = await tx.profile.create({ data: { organizationId: form.mainEvent.organizationId, firstName, lastName: lastNameParts.join(' '), identityDocumentType: String(answers.document_type || '') || null, identityDocumentNumber: String(answers.document_number || '') || null, additionalEmails: [email] } });
-      const participant = await tx.eventParticipant.create({ data: { editionId: edition.id, profileId: profile.id, roleId: role.id } });
-      return { participantId: participant.id, profileId: profile.id };
+    const lastName = String(answers.last_name || answers.lastName || answers.apellidos || answers.surname || fullName.split(/\s+/).slice(1).join(' ')).trim().split(/\s+/).filter(Boolean).join(' ');
+    const result = await this.registrations.register(tx, {
+      eventId: form.mainEventId,
+      editionId: requestedEditionId || form.editionId || null,
+      origin: 'FORM',
+      reviewConflicts: true,
+      createEditionIfMissing: true,
+      person: { firstName, lastName, email, phone: typeof answers.phone === 'string' ? answers.phone : undefined, identityDocumentType: String(answers.document_type || '') || null, identityDocumentNumber: String(answers.document_number || '') || null },
     });
+    return { participantId: result.participant.id, profileId: result.profile.id, editionId: result.edition.id, status: result.participant.status, accessToken: result.participant.accessToken, reviewId: result.review?.id ?? null };
   }
 }

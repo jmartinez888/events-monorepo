@@ -99,6 +99,24 @@ export class MailService {
       }
     }
 
+    // Correo global del sistema por SMTP (p. ej. Google Workspace del IIAP). Tiene prioridad sobre Resend.
+    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      const port = Number(process.env.SMTP_PORT || 587);
+      return this.sendWithSmtp({
+        host: process.env.SMTP_HOST,
+        port,
+        secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+        fromEmail: options.fromEmail || process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER,
+        fromName: options.fromName || process.env.SMTP_FROM_NAME || process.env.APP_NAME || 'Events Platform',
+        to: toRecipients,
+        subject: options.subject,
+        html: options.html,
+        text: options.text,
+      });
+    }
+
     // Default System Fallback using .env
     const apiKey = process.env.RESEND_API_KEY;
     const fromEmail = options.fromEmail || process.env.RESEND_FROM_EMAIL;

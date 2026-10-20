@@ -61,11 +61,10 @@ export class EventsService {
   }
   async attendeeExport(eventId: string) {
     const [allParticipants, submissions] = await Promise.all([
-      this.prisma.eventParticipant.findMany({ where: { edition: { mainEventId: eventId } }, include: { profile: { include: { authUser: true } }, edition: true, role: true }, orderBy: { registeredAt: 'desc' } }),
+      this.prisma.eventParticipant.findMany({ where: { edition: { mainEventId: eventId } }, include: { profile: { include: { authUser: { select: { email: true } } } }, edition: true, role: true, roleAssignments: { include: { role: true } }, attendanceRecords: { where: { scopeKey: 'EVENT' } } }, orderBy: { registeredAt: 'desc' } }),
       this.prisma.registrationSubmission.findMany({ where: { form: { mainEventId: eventId } }, include: { form: { include: { fields: true } } }, orderBy: { submittedAt: 'desc' } }),
     ]);
-    const isSpeakerRole = (roleName?: string | null) => /^(speaker(?:_mg)?|ponente(?:_mg)?)$/i.test(String(roleName || '').trim());
-    const participants = allParticipants.filter((participant) => !isSpeakerRole(participant.role?.name));
+    const participants = allParticipants;
     const editionIds = submissions.map((submission) => submission.editionId).filter((editionId): editionId is string => Boolean(editionId));
     const editions = editionIds.length ? await this.prisma.edition.findMany({ where: { id: { in: editionIds } }, select: { id: true, name: true } }) : [];
     const editionNames = new Map(editions.map((edition) => [edition.id, edition.name]));
@@ -87,9 +86,10 @@ export class EventsService {
     return [
       ...participants.map((participant) => {
         const emails = Array.isArray(participant.profile.additionalEmails) ? participant.profile.additionalEmails : [];
-        const email = participant.profile.authUser?.email || emails.find((value: unknown) => typeof value === 'string' && value.trim()) || '';
+        const email = participant.profile.primaryEmail || participant.profile.authUser?.email || emails.find((value: unknown) => typeof value === 'string' && value.trim()) || '';
         const submission = submissionsByParticipant.get(participant.id);
-        return exportRow(submission, { id: participant.id, participantId: participant.id, roleId: participant.roleId, submissionId: submission?.id, name: [participant.profile.firstName, participant.profile.lastName].filter(Boolean).join(' ') || 'Participante', email, edition: participant.edition.name, editionId: participant.editionId, source: submission?.form.title || 'Participante', sourceFormTitle: submission?.form.title, sourceFormId: submission?.formId, sourceFormPurpose: submission?.form.purpose, type: participant.role?.name || 'Participante', registeredAt: participant.registeredAt });
+        const assignedRoles = participant.roleAssignments.length ? participant.roleAssignments.map((assignment) => assignment.role) : participant.role ? [participant.role] : [];
+        return exportRow(submission, { id: participant.id, participantId: participant.id, profileId: participant.profileId, roleId: participant.roleId, roleIds: assignedRoles.map((role) => role.id), roles: assignedRoles.map((role) => ({ id: role.id, name: role.displayName || role.name })), checkedIn: participant.attendanceRecords.some((record) => record.valid), attendance: participant.attendanceRecords[0] || null, identityDocumentType: participant.profile.identityDocumentType, identityDocumentNumber: participant.profile.identityDocumentNumber, submissionId: submission?.id, name: [participant.profile.firstName, participant.profile.lastName].filter(Boolean).join(' ') || 'Participante', email, edition: participant.edition.name, editionId: participant.editionId, source: submission?.form.title || 'Participante', sourceFormTitle: submission?.form.title, sourceFormId: submission?.formId, sourceFormPurpose: submission?.form.purpose, type: assignedRoles.map((role) => role.displayName || role.name).join(', ') || 'Participante', registeredAt: participant.registeredAt });
       }),
       ...submissions.filter((submission) => !submission.participantId).map((submission) => {
         const answers = submission.answers && typeof submission.answers === 'object' ? submission.answers as Record<string, unknown> : {};

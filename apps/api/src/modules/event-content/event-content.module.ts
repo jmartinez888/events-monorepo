@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../../database/prisma.service.js';
 import { EventContentController } from './event-content.controller.js';
 import { EventContentService } from './event-content.service.js';
-@Module({ controllers: [EventContentController], providers: [EventContentService, PrismaService] })
+import { RolesService } from './roles.service.js';
+import { EventAccessModule } from '../../common/event-access.module.js';
+import { DirectoryModule } from '../directory/directory.module.js';
+@Module({ imports: [EventAccessModule, DirectoryModule], controllers: [EventContentController], providers: [EventContentService, RolesService] })
 export class EventContentModule {}
