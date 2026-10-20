@@ -108,6 +108,10 @@ export function SelectContent({
   )
 }
 
+export function SelectGroup(props: React.HTMLAttributes<HTMLDivElement>) {
+  return <div role="group" {...props} />
+}
+
 export function SelectItem({
   className,
   value,

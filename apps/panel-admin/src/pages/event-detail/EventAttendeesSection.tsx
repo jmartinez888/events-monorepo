@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import { useEventStore } from "@/store/event.store"
@@ -22,6 +22,9 @@ import { useSEO } from "@/hooks/use-seo"
 import { PageHeader } from "@/components/page-header"
 import { api } from "@/api/client"
 import { useAuthStore } from "@/store/auth.store"
+import { Badge } from "@/components/ui/badge"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { ParticipantRolesControl } from "./ParticipantRolesControl"
 
 export function EventAttendeesSection() {
   const { id } = useParams<{ id: string }>()
@@ -40,6 +43,10 @@ export function EventAttendeesSection() {
   const [detailAttendee, setDetailAttendee] = useState<any>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [canManageAttendees, setCanManageAttendees] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [attendanceNote, setAttendanceNote] = useState("")
+  const [savingAttendance, setSavingAttendance] = useState(false)
+  const [loadError, setLoadError] = useState("")
 
   const event = events.find((e) => e.id === id)
   const eventAttendees = serverAttendees !== null ? serverAttendees.map((item) => ({
@@ -61,7 +68,16 @@ export function EventAttendeesSection() {
     return matchesOrigin && matchesEdition && matchesSearch
   })
   const eventEditions = editions.filter((ed) => ed.mainEventId === id)
-  const eventRoles = roles.filter((role) => role.mainEventId === id && role.isActive)
+  const eventRoles = roles.filter((role) => role.mainEventId === id)
+  const selectableIds = filteredAttendees.filter((attendee) => attendee.participantId || !String(attendee.id).startsWith("form:")).map((attendee) => attendee.id)
+  const query = searchParams.get("q") || ""
+  const reloadAttendees = useCallback(async () => {
+    if (!id) return
+    const result = await api.events.attendees(id, query, page)
+    setServerAttendees(result.items)
+    setTotalAttendees(result.total)
+    setLoadError("")
+  }, [id, query, page])
 
   useSEO({
     title: event ? `${event.name} - Participantes` : "Participantes de Evento",
@@ -90,9 +106,18 @@ export function EventAttendeesSection() {
   }, [id, event?.organizationId, selectedOrganization?.id, loadData])
 
   useEffect(() => {
+    let active = true
     if (!id) return
-    api.events.attendees(id, searchParams.get("q") || "", page).then((result) => { setServerAttendees(result.items); setTotalAttendees(result.total) }).catch(() => { setServerAttendees(null); setTotalAttendees(0) })
-  }, [id, page, searchParams])
+    setSearch(query)
+    setSelectedIds([])
+    void api.events.attendees(id, query, page).then((result) => {
+      if (!active) return
+      setServerAttendees(result.items); setTotalAttendees(result.total); setLoadError("")
+    }).catch((error: Error) => { if (active) setLoadError(error.message || "No se pudo cargar la lista") })
+    return () => { active = false }
+  }, [id, page, query])
+
+  useEffect(() => { setSelectedIds([]) }, [formFilter, editionFilter])
 
   useEffect(() => {
     const organizationId = event?.organizationId || selectedOrganization?.id
@@ -115,6 +140,7 @@ export function EventAttendeesSection() {
         await deleteAttendee(attendee.id)
       }
       toast.success("Inscripción eliminada")
+      await reloadAttendees()
     } catch (error: any) {
       toast.error(error?.message || "No se pudo eliminar la inscripción")
     }
@@ -125,6 +151,7 @@ export function EventAttendeesSection() {
     setRefreshing(true)
     try {
       await loadData(event.organizationId)
+      await reloadAttendees()
       toast.success("Lista de participantes actualizada")
     } catch (error: any) {
       toast.error(error?.message || "No se pudo actualizar la lista")
@@ -133,14 +160,29 @@ export function EventAttendeesSection() {
     }
   }
 
-  const changeParticipantRole = async (attendee: any, roleId: string) => {
+  const changeParticipantRoles = async (attendee: any, roleIds: string[]) => {
     try {
-      await api.participants.changeRole(attendee.id, roleId)
+      await api.participants.setRoles(attendee.id, roleIds)
+      await reloadAttendees()
       if (event?.organizationId) await loadData(event.organizationId)
       toast.success("Rol actualizado")
     } catch (error: any) {
       toast.error(error?.message || "No se pudo cambiar el rol")
     }
+  }
+
+  const approveAttendance = async (valid: boolean, participantIds = selectedIds) => {
+    if (!id || !participantIds.length || savingAttendance) return
+    setSavingAttendance(true)
+    try {
+      const result = await api.attendance.approveBulk(id, participantIds, valid, attendanceNote.trim() || undefined)
+      await reloadAttendees()
+      setSelectedIds([])
+      setAttendanceNote("")
+      toast.success(`${result.changed} asistencia(s) ${valid ? "aprobada(s)" : "retirada(s)"}`)
+    } catch (error: any) {
+      toast.error(error?.message || "No se pudo actualizar la asistencia")
+    } finally { setSavingAttendance(false) }
   }
 
   const exportAttendees = async () => {
@@ -170,6 +212,10 @@ export function EventAttendeesSection() {
 
 
   const columns: ColumnDef<any>[] = [
+    ...(canManageAttendees ? [{
+      header: <input type="checkbox" aria-label="Seleccionar participantes de esta página" checked={selectableIds.length > 0 && selectableIds.every((value) => selectedIds.includes(value))} disabled={savingAttendance || !selectableIds.length || !!loadError} onChange={(event) => setSelectedIds(event.target.checked ? selectableIds : [])} />,
+      cell: (at: any) => <input type="checkbox" aria-label={`Seleccionar a ${at.fullName}`} checked={selectedIds.includes(at.id)} disabled={savingAttendance || !selectableIds.includes(at.id) || !!loadError} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, at.id] : current.filter((value) => value !== at.id))} />,
+    }] : []),
     {
       header: "Participante",
       className: "p-3",
@@ -262,7 +308,15 @@ export function EventAttendeesSection() {
       header: "Rol",
       className: "p-3",
       headerClassName: "p-3",
-      cell: (at) => canManageAttendees ? <select value={at.roleId || ""} onChange={(event) => void changeParticipantRole(at, event.target.value)} className="h-8 max-w-36 rounded-md border border-border bg-background px-2 text-xs" aria-label={`Cambiar rol de ${at.fullName}`}><option value="" disabled>Sin rol</option>{eventRoles.map((role) => <option key={role.id} value={role.id}>{role.name?.es || role.name?.en || role.slug}</option>)}</select> : <span className="text-xs text-muted-foreground">{eventRoles.find((role) => role.id === at.roleId)?.name?.es || eventRoles.find((role) => role.id === at.roleId)?.name?.en || "Sin rol"}</span>,
+      cell: (at) => canManageAttendees && selectableIds.includes(at.id) ? <ParticipantRolesControl participant={at} roles={eventRoles} onChange={(roleIds) => changeParticipantRoles(at, roleIds)} /> : <span className="text-xs text-muted-foreground">{at.ticketType || "Sin rol"}</span>,
+    },
+    {
+      header: "Asistencia",
+      cell: (at) => <div className="flex flex-col gap-1">
+        <Badge variant={at.checkedIn ? "default" : "secondary"}>{at.checkedIn ? "Válida" : "Sin aprobar"}</Badge>
+        {at.attendance?.approvedAt ? <span className="text-xs text-muted-foreground">{new Date(at.attendance.approvedAt).toLocaleString("es-PE", { timeZone: "America/Lima", dateStyle: "short", timeStyle: "short" })}</span> : null}
+        {canManageAttendees && selectableIds.includes(at.id) ? <Button variant="ghost" size="sm" disabled={savingAttendance || !!loadError} onClick={() => void approveAttendance(!at.checkedIn, [at.id])}>{at.checkedIn ? "Retirar" : "Aprobar"}</Button> : null}
+      </div>,
     },
     {
       header: "Acciones",
@@ -341,6 +395,17 @@ export function EventAttendeesSection() {
         </div>
         {(search || formFilter !== "ALL" || editionFilter !== "ALL") && <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>Filtros activos:</span>{search && <button type="button" onClick={() => setSearch("")} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">Búsqueda: {search}<X className="size-3" /></button>}{formFilter !== "ALL" && <button type="button" onClick={() => setFormFilter("ALL")} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">Origen seleccionado<X className="size-3" /></button>}{editionFilter !== "ALL" && <button type="button" onClick={() => setEditionFilter("ALL")} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1">Edición: {eventEditions.find((edition) => edition.id === editionFilter)?.name}<X className="size-3" /></button>}<button type="button" onClick={() => { setSearch(""); setFormFilter("ALL"); setEditionFilter("ALL") }} className="ml-1 font-medium text-primary hover:underline">Limpiar todo</button></div>}
       </div>
+
+      {loadError ? <p role="alert" className="text-sm text-destructive">{loadError}</p> : null}
+      {canManageAttendees ? <div className="flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+        <div className="flex flex-col gap-1 text-sm"><strong>{selectedIds.length} seleccionado(s)</strong><span className="text-xs text-muted-foreground">Selección de esta página. Cada cambio conserva su historial.</span></div>
+        <Field className="min-w-48 flex-1">
+          <FieldLabel htmlFor="attendanceNote">Motivo o evidencia (opcional)</FieldLabel>
+          <Input id="attendanceNote" maxLength={1000} value={attendanceNote} onChange={(event) => setAttendanceNote(event.target.value)} placeholder="Lista verificada por el organizador" disabled={savingAttendance} />
+        </Field>
+        <Button disabled={!selectedIds.length || savingAttendance || !!loadError} onClick={() => void approveAttendance(true)}>{savingAttendance ? "Guardando…" : "Aprobar asistencia"}</Button>
+        <Button variant="outline" disabled={!selectedIds.length || savingAttendance || !!loadError} onClick={() => void approveAttendance(false)}>Retirar aprobación</Button>
+      </div> : null}
 
       {filteredAttendees.length === 0 ? (
         <div className="p-8 text-center text-muted-foreground text-sm border border-dashed border-border rounded-lg">

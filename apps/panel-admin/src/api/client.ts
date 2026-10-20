@@ -10,6 +10,21 @@ export class ApiError extends Error {
   constructor(status: number, message: string, code?: string) { super(message); this.status = status; this.code = code }
 }
 
+export interface SessionTokens { accessToken: string; refreshToken: string }
+export interface AccountSecurity { id: string; email: string; role: string; isActive: boolean; emailVerified: boolean; twoFactorEnabled: boolean; twoFactorMethod: "TOTP" | "EMAIL" | null; lastLoginAt: string | null; recoveryCodesLeft?: number }
+/** OK abre sesión; VERIFY_EMAIL y MFA_REQUIRED piden un código con el pendingToken. */
+export type LoginOutcome =
+  | ({ status: "OK"; user: any } & SessionTokens)
+  | { status: "VERIFY_EMAIL"; pendingToken: string; email: string }
+  | { status: "MFA_REQUIRED"; pendingToken: string; email: string; method: "TOTP" | "EMAIL" }
+export type TwoFactorEnabled = SessionTokens & { recoveryCodes: string[]; account: AccountSecurity }
+
+/** Guarda tokens nuevos tras una operación que cambia la versión de sesión. */
+export function storeSessionTokens(tokens: SessionTokens) {
+  localStorage.setItem("events-api-access-token", tokens.accessToken)
+  localStorage.setItem("events-api-refresh-token", tokens.refreshToken)
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   // El navegador debe definir el boundary al enviar FormData para las cargas multimedia.
@@ -44,7 +59,22 @@ export const api = {
     get: (organizationSlug: string, eventId: string) => apiFetch<any>(`/public/organizations/${encodeURIComponent(organizationSlug)}/events/${encodeURIComponent(eventId)}`),
   },
   auth: {
-    login: (email: string, password: string) => apiFetch<{ accessToken: string; refreshToken: string; user: any }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+    login: (email: string, password: string) => apiFetch<LoginOutcome>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+    register: (data: { email: string; password: string; firstName: string; lastName: string }) => apiFetch<LoginOutcome>("/auth/register", { method: "POST", body: JSON.stringify(data) }),
+    verifyEmail: (pendingToken: string, code: string) => apiFetch<LoginOutcome>("/auth/verify-email", { method: "POST", body: JSON.stringify({ pendingToken, code }) }),
+    resendCode: (pendingToken: string) => apiFetch<{ sent: boolean; expiresInMinutes: number }>("/auth/resend-code", { method: "POST", body: JSON.stringify({ pendingToken }) }),
+    completeTwoFactor: (pendingToken: string, code: string) => apiFetch<LoginOutcome>("/auth/login/2fa", { method: "POST", body: JSON.stringify({ pendingToken, code }) }),
+    me: () => apiFetch<AccountSecurity>("/auth/me"),
+    securityEvents: () => apiFetch<Array<{ id: string; action: string; ip: string | null; createdAt: string }>>("/auth/security-events"),
+    changePassword: (currentPassword: string, newPassword: string) => apiFetch<SessionTokens>("/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
+    logoutAll: () => apiFetch<{ revoked: boolean }>("/auth/logout-all", { method: "POST" }),
+    beginTotp: () => apiFetch<{ secret: string; otpauthUri: string }>("/auth/2fa/totp/setup", { method: "POST" }),
+    enableTotp: (code: string) => apiFetch<TwoFactorEnabled>("/auth/2fa/totp/enable", { method: "POST", body: JSON.stringify({ code }) }),
+    beginEmailTwoFactor: () => apiFetch<{ sent: boolean; email: string; expiresInMinutes: number }>("/auth/2fa/email/setup", { method: "POST" }),
+    enableEmailTwoFactor: (code: string) => apiFetch<TwoFactorEnabled>("/auth/2fa/email/enable", { method: "POST", body: JSON.stringify({ code }) }),
+    disableTwoFactor: (password: string) => apiFetch<SessionTokens & { account: AccountSecurity }>("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password }) }),
+    regenerateRecoveryCodes: (password: string) => apiFetch<{ recoveryCodes: string[] }>("/auth/2fa/recovery-codes", { method: "POST", body: JSON.stringify({ password }) }),
+    resetUserTwoFactor: (id: string) => apiFetch<{ reset: boolean }>(`/auth/users/${id}/reset-2fa`, { method: "POST" }),
     refresh: (refreshToken: string) => apiFetch<{ accessToken: string; refreshToken: string }>("/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken }) }),
     forgotPassword: (email: string) => apiFetch<any>("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
     resetPassword: (token: string, password: string) => apiFetch<any>("/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) }),
@@ -141,7 +171,12 @@ export const api = {
     get: (id: string) => apiFetch<any>(`/participants/${id}`),
     update: (id: string, data: any) => apiFetch<any>(`/participants/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     changeRole: (id: string, roleId: string) => apiFetch<any>(`/participants/${id}/role`, { method: "PATCH", body: JSON.stringify({ roleId }) }),
+    setRoles: (id: string, roleIds: string[]) => apiFetch<any>(`/participants/${id}/roles`, { method: "PATCH", body: JSON.stringify({ roleIds }) }),
     remove: (id: string) => apiFetch<any>(`/participants/${id}`, { method: "DELETE" }),
+  },
+  attendance: {
+    list: (eventId: string) => apiFetch<any[]>(`/events/${eventId}/attendance`),
+    approveBulk: (eventId: string, participantIds: string[], valid: boolean, note?: string) => apiFetch<{ selected: number; changed: number; batchId: string }>(`/events/${eventId}/attendance/bulk`, { method: "POST", body: JSON.stringify({ participantIds, valid, note }) }),
   },
   certificates: {
     list: (participantId?: string) => apiFetch<any[]>(`/certificates${participantId ? `?participantId=${encodeURIComponent(participantId)}` : ""}`),
@@ -273,4 +308,72 @@ export const api = {
     dispatchDue: (limit = 100) => apiFetch<any>(`/marketing/deliveries/dispatch?limit=${limit}`, { method: "POST" }),
     analytics: (organizationId: string) => apiFetch<Record<string, number>>(`/organizations/${organizationId}/marketing/analytics`),
   },
+  registrations: {
+    list: (eventId: string, status?: string) => apiFetch<any[]>(`/events/${eventId}/registrations${status ? `?status=${status}` : ""}`),
+    cancel: (participantId: string) => apiFetch<{ cancelled: boolean; promoted: number }>(`/participants/${participantId}/cancel`, { method: "POST" }),
+    confirm: (participantId: string) => apiFetch<any>(`/participants/${participantId}/confirm`, { method: "POST" }),
+    promoteWaitlist: (eventId: string) => apiFetch<{ promoted: number }>(`/events/${eventId}/registrations/promote-waitlist`, { method: "POST" }),
+  },
+  integrations: {
+    overview: (eventId: string) => apiFetch<IntegrationsOverview>(`/events/${eventId}/integrations`),
+    updateSettings: (eventId: string, data: Partial<EventSettings>) => apiFetch<EventSettings>(`/events/${eventId}/settings`, { method: "PATCH", body: JSON.stringify(data) }),
+    syncNow: (eventId: string) => apiFetch<{ sessions: number }>(`/events/${eventId}/integrations/sync`, { method: "POST" }),
+    importZoom: (sessionId: string) => apiFetch<{ rows: number; people: number; valid: number; createdFromOpenRegistration: number; keptManualDecisions: number }>(`/sessions/${sessionId}/zoom/import-attendance`, { method: "POST" }),
+    reconcileAttendance: (sessionId: string) => apiFetch<{ attendees: number }>(`/sessions/${sessionId}/attendance/reconcile`, { method: "POST" }),
+    hostStartUrl: (sessionId: string) => apiFetch<{ startUrl: string }>(`/sessions/${sessionId}/zoom/start-url`),
+    retryJob: (jobId: string) => apiFetch<any>(`/integration-jobs/${jobId}/retry`, { method: "POST" }),
+  },
+  files: {
+    list: (eventId: string) => apiFetch<EventFile[]>(`/events/${eventId}/files`),
+    upload: (eventId: string, file: File, data: { scope: "MATERIAL" | "DOCUMENT"; title: string; visibility: FileVisibility; sessionId?: string; sessionSpeakerId?: string; documentType?: string }) => {
+      const body = new FormData()
+      body.append("file", file)
+      for (const [key, value] of Object.entries(data)) if (value) body.append(key, value)
+      return apiFetch<EventFile>(`/events/${eventId}/files`, { method: "POST", body })
+    },
+    replace: (fileId: string, file: File) => {
+      const body = new FormData()
+      body.append("file", file)
+      return apiFetch<EventFile>(`/event-files/${fileId}/versions`, { method: "POST", body })
+    },
+    update: (fileId: string, data: { title?: string; visibility?: FileVisibility; status?: "ACTIVE" | "HIDDEN" | "DELETED" }) => apiFetch<EventFile>(`/event-files/${fileId}`, { method: "PATCH", body: JSON.stringify(data) }),
+    download: (fileId: string, version?: number) => apiFetch<{ url: string; expiresAt: string }>(`/event-files/${fileId}/download${version ? `?version=${version}` : ""}`),
+    mySpeakerSessions: () => apiFetch<any[]>("/me/speaker-sessions"),
+  },
+  eventCertificates: {
+    list: (eventId: string) => apiFetch<any[]>(`/events/${eventId}/certificates`),
+    issue: (eventId: string, data: { participantIds?: string[]; roleIds?: string[]; templateId?: string }) => apiFetch<{ issued: number; pending: number; certificates: any[]; skipped: Array<{ participantId: string; roleId: string | null; reason: string }> }>(`/events/${eventId}/certificates/issue`, { method: "POST", body: JSON.stringify(data) }),
+    directApproval: (eventId: string, data: { participantIds: string[]; roleId: string; approved: boolean; reason?: string }) => apiFetch<{ updated: number }>(`/events/${eventId}/role-approvals`, { method: "POST", body: JSON.stringify(data) }),
+    revoke: (id: string, reason?: string) => apiFetch<any>(`/certificates/${id}/revoke`, { method: "POST", body: JSON.stringify({ reason }) }),
+    reissue: (id: string, reason?: string) => apiFetch<any>(`/certificates/${id}/reissue`, { method: "POST", body: JSON.stringify({ reason }) }),
+    retry: (id: string) => apiFetch<any>(`/certificates/${id}/retry`, { method: "POST" }),
+  },
+  directory: {
+    reviews: (organizationId: string, status: "OPEN" | "RESOLVED" = "OPEN") => apiFetch<any[]>(`/directory/reviews?organizationId=${encodeURIComponent(organizationId)}&status=${status}`),
+    resolve: (id: string, data: { action: "KEEP_SEPARATE" | "MERGE"; targetProfileId?: string }) => apiFetch<any>(`/directory/reviews/${id}/resolve`, { method: "POST", body: JSON.stringify(data) }),
+  },
+}
+
+export type FileVisibility = "PUBLIC" | "REGISTERED" | "PRIVATE"
+export interface EventFile {
+  id: string; scope: "MATERIAL" | "DOCUMENT"; title: string; documentType: string | null; visibility: FileVisibility; status: "ACTIVE" | "HIDDEN" | "DELETED"; currentVersion: number; createdAt: string
+  session: { id: string; title: string } | null
+  speaker: { id: string; role: string; profile: { firstName: string | null; lastName: string | null } } | null
+  versions: Array<{ id: string; version: number; fileName: string; mimeType: string; size: number; createdAt: string }>
+}
+export interface EventSettings {
+  virtualAttendanceMode: "MANUAL" | "AUTOMATIC"; attendanceThreshold: number; capacity: number | null; waitlistEnabled: boolean; reminderOffsets: number[]
+  zoomEnabled: boolean; facebookLiveEnabled: boolean; attendanceMirrorEnabled: boolean; eventMode?: string | null
+}
+export type SyncState = "DISABLED" | "PENDING" | "SYNCED" | "ERROR"
+export interface IntegrationsOverview {
+  providers: { zoom: boolean; zoomWebhook: boolean; facebook: boolean; attendance: boolean; certificates: boolean; telegram: boolean; storage: string }
+  settings: EventSettings & { id: string; eventName: string }
+  sessions: Array<{
+    id: string; title: string; startsAt: string | null; endsAt: string | null; modality: string | null
+    activity: { title: string; edition: { id: string; name: string } }
+    integration: { zoomMeetingId: string | null; zoomJoinUrl: string | null; zoomStatus: SyncState; zoomError: string | null; zoomEndedAt: string | null; facebookLiveUrl: string | null; facebookStatus: SyncState; facebookError: string | null; attendanceEventId: string | null; attendanceStatus: SyncState; attendanceError: string | null; attendanceSyncedAt: string | null } | null
+    registrants: Array<{ status: SyncState; count: number }>
+  }>
+  failedJobs: Array<{ id: string; kind: string; lastError: string | null; attempts: number; updatedAt: string }>
 }

@@ -36,7 +36,7 @@ export function LoginPage() {
 
         {/* Form Container */}
         <div className="my-auto py-8">
-          <LoginForm className="w-full max-w-sm mx-auto" />
+          <LoginForm key={location.pathname} className="w-full max-w-sm mx-auto" initialMode={location.pathname === "/register" ? "register" : "login"} />
         </div>
 
         {/* Footer info */}

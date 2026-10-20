@@ -15,10 +15,13 @@ const NAV_ITEMS = [
   { to: "speakers", label: "Ponentes" },
   { to: "agenda", label: "Agenda" },
   { to: "attendees", label: "Participantes" },
+  { to: "registrations", label: "Inscripciones" },
   { to: "roles", label: "Roles" },
   { to: "thematic-lines", label: "Líneas Temáticas" },
   { to: "tickets", label: "Tickets" },
   { to: "certificates", label: "Certificados" },
+  { to: "files", label: "Materiales" },
+  { to: "integrations", label: "Integraciones" },
   { to: "forms", label: "Formularios" },
   { to: "public-api", label: "API pública" },
 ]

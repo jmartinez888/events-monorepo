@@ -47,6 +47,8 @@ export function ProfileLayout() {
     { to: "experience", label: "Experiencia Profesional" },
     { to: "education", label: "Estudios" },
     { to: "certifications", label: "Certificaciones" },
+    { to: "talks", label: "Mis ponencias" },
+    { to: "security", label: "Seguridad" },
   ]
 
   const getLinkClass = ({ isActive }: { isActive: boolean }) =>

@@ -12,6 +12,8 @@ import {
   ProfileExperienceSection,
   ProfileEducationSection,
   ProfileCertificationsSection,
+  ProfileSecuritySection,
+  ProfileTalksSection,
 } from "@/pages/profile"
 import { EventsPage } from "@/pages/EventsPage"
 import { EventDetailPage } from "@/pages/EventDetailPage"
@@ -42,8 +44,12 @@ import {
   EventFormsSection,
   EventPublicApiSection,
   EventFormBuilderPage,
+  EventRegistrationsSection,
+  EventIntegrationsSection,
+  EventFilesSection,
 } from "@/pages/event-detail"
 import { GlobalCertificatesPage } from "@/pages/GlobalCertificatesPage"
+import { DirectoryReviewsPage } from "@/pages/DirectoryReviewsPage"
 import {
   ProfilesPage,
   ProfileManageLayout,
@@ -99,6 +105,7 @@ export function AppRouter() {
       <Routes>
         {/* Public Routes */}
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<LoginPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route path="/validar/:code" element={<VerifyCertificatePage />} />
 
@@ -143,6 +150,8 @@ export function AppRouter() {
           <Route path="experience" element={<ProfileExperienceSection />} />
           <Route path="education" element={<ProfileEducationSection />} />
           <Route path="certifications" element={<ProfileCertificationsSection />} />
+          <Route path="talks" element={<ProfileTalksSection />} />
+          <Route path="security" element={<ProfileSecuritySection />} />
         </Route>
 
         {/* Protected Dashboard Routes (Requires Selected Organization) */}
@@ -178,6 +187,7 @@ export function AppRouter() {
 
           {/* Certificates Catalog */}
           <Route path="certificates" element={<GlobalCertificatesPage />} />
+          <Route path="directory-reviews" element={<DirectoryReviewsPage />} />
 
           {/* Settings Page */}
           <Route path="settings/business" element={<OrganizationSettingsPage />} />
@@ -298,6 +308,9 @@ export function AppRouter() {
           <Route path="certificates" element={<EventCertificatesSection />} />
           <Route path="forms" element={<EventFormsSection />} />
           <Route path="public-api" element={<EventPublicApiSection />} />
+          <Route path="registrations" element={<EventRegistrationsSection />} />
+          <Route path="files" element={<EventFilesSection />} />
+          <Route path="integrations" element={<EventIntegrationsSection />} />
         </Route>
 
         {/* Profiles Detail - Standalone (no admin layout) */}

@@ -14,6 +14,7 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
+  SelectGroup,
 } from "@/components/ui/select"
 import { Check, Loader2, Trash2, Plus } from "lucide-react"
 import { MediaUploader } from "@/components/MediaUploader"
@@ -70,11 +71,11 @@ export function CreateSpeakerPage() {
   }, [eventId, loadRoles, loadThematicLines])
 
   // Get active roles of this event
-  const activeRoles = roles.filter((r) => r.mainEventId === eventId && r.isActive)
+  const activeRoles = roles.filter((r) => r.mainEventId === eventId && r.isActive && r.isSpeaker && (!r.editionId || r.editionId === selectedEditionId))
 
   // Find speaker and keynote-speaker roles
   const speakerRole = activeRoles.find((r) => r.slug === "speaker")
-  const keynoteRole = activeRoles.find((r) => r.slug === "keynote-speaker")
+  const keynoteRole = activeRoles.find((r) => r.slug === "speaker_mg" || r.slug === "keynote-speaker")
 
   // Default-select role (prefer slug "speaker", else keynote-speaker, else first active role)
   useEffect(() => {
@@ -417,21 +418,13 @@ export function CreateSpeakerPage() {
                       <SelectValue placeholder="Selecciona un rol" />
                     </SelectTrigger>
                     <SelectContent>
-                      {speakerRole && (
-                        <SelectItem value={speakerRole.id}>
-                          Ponente
-                        </SelectItem>
-                      )}
-                      {keynoteRole && (
-                        <SelectItem value={keynoteRole.id}>
-                          Ponente Magistral
-                        </SelectItem>
-                      )}
-                      {!speakerRole && !keynoteRole && activeRoles.map((role) => (
+                      <SelectGroup>
+                      {activeRoles.map((role) => (
                         <SelectItem key={role.id} value={role.id}>
                           {role.name.es}
                         </SelectItem>
                       ))}
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                 )}

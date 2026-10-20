@@ -16,6 +16,7 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
+  SelectGroup,
 } from "@/components/ui/select"
 import {
   Sheet,
@@ -127,6 +128,11 @@ export function EventRolesSection() {
   const [isActive, setIsActive] = useState(true)
   const [autoSlug, setAutoSlug] = useState(true)
   const [formError, setFormError] = useState("")
+  const [certificateHours, setCertificateHours] = useState(0)
+  const [requiresAttendance, setRequiresAttendance] = useState(true)
+  const [certificateText, setCertificateText] = useState("")
+  const [isSpeaker, setIsSpeaker] = useState(false)
+  const [saving, setSaving] = useState(false)
 
   // Load roles on mount
   useEffect(() => {
@@ -143,6 +149,10 @@ export function EventRolesSection() {
   }, [isEditionSpecific, currentEdition, selectedEditionId])
 
   const openCreate = () => {
+    setCertificateHours(0)
+    setRequiresAttendance(true)
+    setCertificateText("")
+    setIsSpeaker(false)
     setEditingId(null)
     setNameEs("")
     setNameEn("")
@@ -157,6 +167,10 @@ export function EventRolesSection() {
   }
 
   const openCreateWithSuggestion = (sug: typeof SUGGESTIONS[0]) => {
+    setCertificateHours(0)
+    setRequiresAttendance(sug.slug === "participant")
+    setCertificateText("")
+    setIsSpeaker(sug.slug.startsWith("speaker"))
     setEditingId(null)
     setNameEs(sug.nameEs)
     setNameEn(sug.nameEn)
@@ -171,6 +185,10 @@ export function EventRolesSection() {
   }
 
   const openEdit = (role: ParticipantRole) => {
+    setCertificateHours(role.certificateHours || 0)
+    setRequiresAttendance(role.requiresAttendance !== false)
+    setCertificateText(role.certificateText || "")
+    setIsSpeaker(role.isSpeaker || false)
     setEditingId(role.id)
     setNameEs(role.name.es || "")
     setNameEn(role.name.en || "")
@@ -210,6 +228,7 @@ export function EventRolesSection() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (saving) return
     setFormError("")
 
     const validation = roleFormSchema.safeParse({
@@ -222,6 +241,14 @@ export function EventRolesSection() {
       setFormError(validation.error.issues[0].message)
       return
     }
+    if (!Number.isInteger(certificateHours) || certificateHours < 0 || certificateHours > 10000) {
+      setFormError("Las horas deben ser un entero entre 0 y 10000.")
+      return
+    }
+    if (isEditionSpecific && !selectedEditionId) {
+      setFormError("Selecciona una edición para este rol.")
+      return
+    }
 
     const payload = {
       mainEventId: id!,
@@ -230,9 +257,14 @@ export function EventRolesSection() {
       name: { es: nameEs.trim(), en: nameEn.trim() },
       badgeColor,
       isActive,
+      isSpeaker,
+      certificateHours,
+      requiresAttendance,
+      certificateText: certificateText.trim() || null,
     }
 
     try {
+      setSaving(true)
       if (editingId) {
         await updateRole(editingId, payload)
         toast.success("Rol actualizado correctamente")
@@ -258,6 +290,8 @@ export function EventRolesSection() {
       const message = err?.message || "Ocurrió un error al guardar el rol. Verifica que el slug sea único."
       setFormError(message)
       toast.error(message)
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -510,8 +544,25 @@ export function EventRolesSection() {
                   required
                 />
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Usa uno de estos códigos: participant, coordinator, speaker o speaker_mg.
+                  Define un código único: asistente, organizador, comite_cientifico, moderador o cualquier otro rol.
                 </p>
+              </Field>
+
+              <Field orientation="horizontal">
+                <Switch id="speakerRole" checked={isSpeaker} onCheckedChange={setIsSpeaker} />
+                <FieldLabel htmlFor="speakerRole">Este rol participa como expositor en la agenda</FieldLabel>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="certificateHours">Horas académicas del certificado</FieldLabel>
+                <Input id="certificateHours" type="number" min={0} max={10000} step={1} value={certificateHours} onChange={(event) => setCertificateHours(Number(event.target.value))} />
+              </Field>
+              <Field orientation="horizontal">
+                <Switch id="requiresAttendance" checked={requiresAttendance} onCheckedChange={setRequiresAttendance} />
+                <FieldLabel htmlFor="requiresAttendance">Requiere asistencia válida para certificar</FieldLabel>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="certificateText">Texto de participación</FieldLabel>
+                <Input id="certificateText" maxLength={2000} value={certificateText} onChange={(event) => setCertificateText(event.target.value)} placeholder="Por su participación como integrante del comité científico" />
               </Field>
 
               {/* Badge Color Customization */}
@@ -589,11 +640,13 @@ export function EventRolesSection() {
                           <SelectValue placeholder="Selecciona una edición" />
                         </SelectTrigger>
                         <SelectContent>
+                          <SelectGroup>
                           {eventEditions.map((ed) => (
                             <SelectItem key={ed.id} value={ed.id}>
                               {ed.name} ({ed.year}) {ed.isCurrent ? "— [Actual]" : ""}
                             </SelectItem>
                           ))}
+                          </SelectGroup>
                         </SelectContent>
                       </Select>
                     )}
@@ -625,8 +678,8 @@ export function EventRolesSection() {
             <Button type="button" variant="outline" onClick={closeSheet}>
               Cancelar
             </Button>
-            <Button onClick={handleSave} className="font-semibold">
-              {editingId ? "Guardar Cambios" : "Crear Rol"}
+            <Button onClick={handleSave} disabled={saving} className="font-semibold">
+              {saving ? "Guardando…" : editingId ? "Guardar Cambios" : "Crear Rol"}
             </Button>
           </SheetFooter>
         </SheetContent>

@@ -12,6 +12,7 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
+  SelectGroup,
 } from "@/components/ui/select"
 import { AlertTriangle, Trash2, Plus, Loader2, Edit, Search, ChevronLeft, ChevronRight } from "lucide-react"
 import { MediaUploader } from "@/components/MediaUploader"
@@ -324,11 +325,9 @@ export function EditSpeakerPage() {
   }
 
   // Get active roles of this event
-  const activeRoles = roles.filter((r) => r.mainEventId === eventId && r.isActive)
+  const activeRoles = roles.filter((r) => r.mainEventId === eventId && r.isActive && r.isSpeaker && (!r.editionId || r.editionId === selectedEditionId))
 
   // Find speaker and keynote-speaker roles
-  const speakerRole = activeRoles.find((r) => r.slug === "speaker")
-  const keynoteRole = activeRoles.find((r) => r.slug === "keynote-speaker")
 
   const speakerEditFormSchema = z.object({
     firstName: z.string().trim().min(1, "El nombre es obligatorio."),
@@ -644,21 +643,13 @@ export function EditSpeakerPage() {
                       <SelectValue placeholder="Selecciona un rol" />
                     </SelectTrigger>
                     <SelectContent>
-                      {speakerRole && (
-                        <SelectItem value={speakerRole.id}>
-                          Ponente
-                        </SelectItem>
-                      )}
-                      {keynoteRole && (
-                        <SelectItem value={keynoteRole.id}>
-                          Ponente Magistral
-                        </SelectItem>
-                      )}
-                      {!speakerRole && !keynoteRole && activeRoles.map((role) => (
+                      <SelectGroup>
+                      {activeRoles.map((role) => (
                         <SelectItem key={role.id} value={role.id}>
                           {role.name.es}
                         </SelectItem>
                       ))}
+                      </SelectGroup>
                     </SelectContent>
                   </Select>
                 )}

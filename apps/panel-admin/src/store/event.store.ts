@@ -125,6 +125,11 @@ export interface ParticipantRole {
   badgeColor: string | null
   isActive: boolean
   createdAt: string
+  isSpeaker?: boolean
+  certificateHours?: number
+  requiresAttendance?: boolean
+  certificateText?: string | null
+  externalTemplateId?: string | null
 }
 
 export interface ThematicLine {
@@ -325,11 +330,16 @@ function mapParticipantRole(row: any): ParticipantRole {
     id: row.id,
     mainEventId: row.mainEventId || row.main_event_id,
     editionId: row.editionId || row.edition_id || null,
-    slug: row.slug || String(name.en || name.es || "").toLowerCase().replace(/[\s-]+/g, "_"),
-    name,
+    slug: row.slug || (typeof row.name === "string" ? row.name : String(name.en || name.es || "").toLowerCase().replace(/[\s-]+/g, "_")),
+    name: row.displayName ? { es: row.displayName, en: row.displayNameEn || "" } : name,
     badgeColor: row.badgeColor || row.badge_color,
     isActive: row.isActive ?? row.is_active ?? true,
     createdAt: row.createdAt || row.created_at || "",
+    isSpeaker: row.isSpeaker ?? /^(speaker(?:_mg)?|ponente(?:_mg)?)$/.test(row.name || ""),
+    certificateHours: row.certificateHours ?? 0,
+    requiresAttendance: row.requiresAttendance ?? true,
+    certificateText: row.certificateText ?? null,
+    externalTemplateId: row.externalTemplateId ?? null,
   }
 }
 
@@ -472,7 +482,7 @@ export const useEventStore = create<EventState>((set, get) => ({
             const matchedRole = formattedRoles.find((r) => r.id === part.roleId)
             const roleName = String(matchedRole?.name?.es || matchedRole?.name?.en || "")
             const roleIdentifier = `${matchedRole?.slug || ""} ${roleName}`
-            const isSpeakerRole = /ponente|speaker(?:[_\s-]|$)/i.test(roleIdentifier)
+            const isSpeakerRole = !!matchedRole?.isSpeaker || (part.roleAssignments || []).some((assignment: any) => assignment.role?.isSpeaker) || /ponente|speaker(?:[_\s-]|$)/i.test(roleIdentifier)
             const roleSlug = matchedRole?.slug || (isSpeakerRole ? "speaker" : roleName.toLowerCase().replace(/\s+/g, "-") || "attendee")
             const roleId = part.roleId || ""
             const fullName = `${profile.firstName || profile.first_name || ""} ${profile.lastName || profile.last_name || ""}`.trim() || "Participante"
@@ -790,7 +800,7 @@ export const useEventStore = create<EventState>((set, get) => ({
   addSpeaker: async (speakerData) => {
     try {
       if (speakerData.editionId) {
-        const created = await api.content.createSpeaker(speakerData.eventId, { editionId: speakerData.editionId, profileId: speakerData.profileId || undefined, roleId: speakerData.roleId || undefined, firstName: speakerData.firstName, lastName: speakerData.lastName, bio: speakerData.bio })
+        const created = await api.content.createSpeaker(speakerData.eventId, { editionId: speakerData.editionId, profileId: speakerData.profileId || undefined, roleId: speakerData.roleId || undefined, firstName: speakerData.firstName, lastName: speakerData.lastName, bio: speakerData.bio, email: speakerData.email || undefined, identityDocumentType: speakerData.identityDocumentType || undefined, identityDocumentNumber: speakerData.identityDocumentNumber || undefined })
         const profile = created.profile || {}
         const participantId = created.id
         set((state) => ({ speakers: [...state.speakers, { ...speakerData, id: participantId, profileId: profile.id || "", name: `${speakerData.firstName} ${speakerData.lastName}`.trim(), checkedIn: false }] as Speaker[] }))
@@ -1025,7 +1035,7 @@ export const useEventStore = create<EventState>((set, get) => ({
   loadRoles: async (mainEventId) => {
     try {
       const data = await api.content.roles(mainEventId)
-      const loaded = (data || []).map((row: any) => ({ id: row.id, mainEventId, editionId: row.editionId || null, slug: row.slug || row.name.toLowerCase().replace(/\s+/g, "-"), name: { es: row.name }, badgeColor: row.badgeColor || null, isActive: row.isActive !== false, createdAt: row.createdAt || new Date().toISOString() }))
+      const loaded = (data || []).map(mapParticipantRole)
       set((state) => ({ roles: [...state.roles.filter((role) => role.mainEventId !== mainEventId), ...loaded] }))
     } catch (e) {
       console.error("Error loading participant roles:", e)
@@ -1305,10 +1315,11 @@ export const useEventStore = create<EventState>((set, get) => ({
 
   addRole: async (roleData) => {
     try {
-      const created = await api.content.createRole({ name: roleData.slug, mainEventId: roleData.mainEventId, editionId: roleData.editionId || undefined })
+      const created = await api.content.createRole({ ...roleData, name: roleData.slug, displayName: roleData.name.es, displayNameEn: roleData.name.en || null })
       const id = created.id
 
       const mapped: ParticipantRole = {
+        ...mapParticipantRole(created),
         id,
         mainEventId: roleData.mainEventId,
         editionId: roleData.editionId,
@@ -1330,10 +1341,10 @@ export const useEventStore = create<EventState>((set, get) => ({
 
   updateRole: async (id, updates) => {
     try {
-      await api.content.updateRole(id, { name: updates.slug || updates.name?.en || updates.name?.es })
+      const updated = await api.content.updateRole(id, { ...updates, name: updates.slug, displayName: updates.name?.es, displayNameEn: updates.name?.en || null })
 
       set((state) => ({
-        roles: state.roles.map((r) => r.id === id ? { ...r, ...updates } : r)
+        roles: state.roles.map((r) => r.id === id ? mapParticipantRole(updated) : r)
       }))
     } catch (e) {
       console.error("Error updating role:", e)
