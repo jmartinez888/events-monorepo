@@ -1,2 +1,2 @@
-# Archivos subidos con STORAGE_DRIVER=local
-storage/
+# Archivos subidos con STORAGE_DRIVER=local (solo la carpeta de la raíz de apps/api)
+/storage/
