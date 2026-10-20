@@ -19,6 +19,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const payload = exception instanceof HttpException ? exception.getResponse() : null;
     const rawMessage = typeof payload === 'object' && payload ? (payload as any).message : undefined;
     const message = Array.isArray(rawMessage) ? rawMessage.join('. ') : rawMessage || (status === 500 ? 'Ocurrió un error inesperado. Inténtalo de nuevo.' : 'No se pudo completar la operación.');
-    return response.status(status).json({ statusCode: status, message, path: request.url });
+    // Código estable para que la interfaz distinga casos (p. ej. CODE_EXPIRED) sin leer el texto.
+    const code = typeof payload === 'object' && payload && typeof (payload as any).code === 'string' ? (payload as any).code : undefined;
+    return response.status(status).json({ statusCode: status, message, ...(code ? { code } : {}), path: request.url });
   }
 }

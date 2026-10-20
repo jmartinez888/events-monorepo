@@ -16,11 +16,21 @@ import { EmailSettingsModule } from './modules/email-settings/email-settings.mod
 import { MarketingModule } from './modules/marketing/marketing.module.js';
 import { PublicEventsModule } from './modules/public-events/public-events.module.js';
 import { MediaModule } from './modules/media/media.module.js';
+import { AttendanceModule } from './modules/attendance/attendance.module.js';
+import { StorageModule } from './modules/storage/storage.module.js';
+import { IntegrationCoreModule } from './modules/integrations/integration-core.module.js';
+import { IntegrationsModule } from './modules/integrations/integrations.module.js';
+import { NotificationsModule } from './modules/notifications/notifications.module.js';
+import { RegistrationsModule } from './modules/registrations/registrations.module.js';
+import { EventFilesModule } from './modules/event-files/event-files.module.js';
+import { DirectoryModule } from './modules/directory/directory.module.js';
 
 @Module({
   imports: [
     PrismaModule,
     MailModule,
+    StorageModule,
+    IntegrationCoreModule,
     AuthModule,
     ProfilesModule,
     OrganizationsModule,
@@ -35,6 +45,12 @@ import { MediaModule } from './modules/media/media.module.js';
     MarketingModule,
     PublicEventsModule,
     MediaModule,
+    AttendanceModule,
+    DirectoryModule,
+    NotificationsModule,
+    RegistrationsModule,
+    EventFilesModule,
+    IntegrationsModule,
   ],
   controllers: [HealthController],
 })

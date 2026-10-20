@@ -1,21 +1,20 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { PrismaService } from '../../database/prisma.service.js';
 
+/**
+ * Exige una cuenta SUPER_ADMIN activa según la base, no según el token: un rol
+ * retirado deja de valer aunque el token de acceso aún no haya expirado.
+ */
 @Injectable()
 export class AdminGuard implements CanActivate {
-  constructor(private readonly jwt: JwtService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   async canActivate(context: ExecutionContext) {
-    const request = context.switchToHttp().getRequest<{ headers: { authorization?: string } }>();
-    const token = request.headers.authorization?.replace(/^Bearer\s+/i, '');
-    if (!token) throw new UnauthorizedException('Se requiere autenticación de administrador');
-    try {
-      const payload = await this.jwt.verifyAsync<{ role?: string }>(token, { secret: process.env.JWT_ACCESS_SECRET });
-      if (!['SUPER_ADMIN', 'SAAS_ADMIN'].includes(payload.role ?? '')) throw new UnauthorizedException('Se requiere un administrador global');
-      return true;
-    } catch (error) {
-      if (error instanceof UnauthorizedException) throw error;
-      throw new UnauthorizedException('Sesión inválida o expirada');
-    }
+    const request = context.switchToHttp().getRequest<{ user?: { accountId?: string } }>();
+    const accountId = request.user?.accountId;
+    if (!accountId) throw new UnauthorizedException('Se requiere autenticación de administrador');
+    const account = await this.prisma.authUser.findUnique({ where: { id: accountId }, select: { role: true, isActive: true } });
+    if (!account?.isActive || account.role !== 'SUPER_ADMIN') throw new ForbiddenException('Se requiere un administrador global');
+    return true;
   }
 }
