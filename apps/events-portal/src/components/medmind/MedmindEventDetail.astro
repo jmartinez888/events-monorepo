@@ -142,7 +142,7 @@ const coloredTitle = titleWords.slice(splitAt).join(' ');
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.message || 'No se pudo completar la inscripción.');
       if (data.thankYouRedirectUrl) { window.location.assign(data.thankYouRedirectUrl); return; }
-      form.hidden = true; const success = document.querySelector<HTMLElement>('#medmind-success'); if (data.thankYouMessage && success) { const copy = success.querySelector('p'); if (copy) copy.textContent = data.thankYouMessage; } success?.removeAttribute('hidden');
+      form.hidden = true; const success = document.querySelector<HTMLElement>('#medmind-success'); if (data.thankYouMessage && success) { const copy = success.querySelector('p'); if (copy) copy.textContent = data.thankYouMessage; } success?.removeAttribute('hidden'); if (data.registration?.accessToken && success) { const link = document.createElement('a'); link.href = `/${window.location.pathname.split('/').filter(Boolean)[0]}/inscripcion/${data.registration.accessToken}`; link.textContent = data.registration.status === 'WAITLISTED' ? 'Estás en lista de espera · Ver mi inscripción' : 'Ver mi inscripción y enlaces'; link.className = 'registration-link'; success.appendChild(link); }
     } catch (error: any) { status!.textContent = error.message || 'Ocurrió un error. Inténtalo de nuevo.'; } finally { button.disabled = false; }
   });
   document.querySelectorAll<HTMLElement>('[data-countdown-date]').forEach((banner) => {

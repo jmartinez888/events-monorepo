@@ -4,6 +4,7 @@ import { portalApi } from '../../../../../lib/api';
 
 const { institution, formSlug } = Astro.params;
 const eventId = Astro.url.searchParams.get('eventId');
+const token = Astro.url.searchParams.get('token');
 if (!institution || !formSlug) return new Response('Página no encontrada', { status: 404 });
 let listing: Awaited<ReturnType<typeof portalApi.events>>;
 let form: any;
@@ -12,7 +13,7 @@ let eventDetail: any;
 try {
   [listing, form] = await Promise.all([
     portalApi.events(institution),
-    fetch(`${portalApi.apiUrl}/public/registration-forms/${encodeURIComponent(formSlug)}`).then((response) => response.ok ? response.json() : Promise.reject()),
+    fetch(`${portalApi.serverApiUrl}/public/registration-forms/${encodeURIComponent(formSlug)}`).then((response) => response.ok ? response.json() : Promise.reject()),
   ]);
   event = eventId ? (listing.events || []).find((item: any) => item.id === eventId) : null;
   eventDetail = eventId ? await portalApi.event(institution, eventId) : null;
@@ -21,6 +22,9 @@ const activeEdition = eventDetail?.editions?.find((edition: any) => edition.isCu
 const eventDate = activeEdition?.startDate ? new Date(activeEdition.startDate) : (event?.startDate ? new Date(event.startDate) : (form.edition?.startDate ? new Date(form.edition.startDate) : null));
 const message = form.thankYouMessage || 'Tu inscripción fue recibida correctamente. Te enviaremos los detalles al correo registrado.';
 // Conserva el diseño: el CTA sólo existe cuando el evento tiene una comunidad configurada.
+// Estado real de la inscripción (confirmada o en lista de espera) desde su enlace único.
+const registration = token ? await fetch(`${portalApi.serverApiUrl}/public/registrations/${encodeURIComponent(token)}`).then((response) => response.ok ? response.json() : null).catch(() => null) : null;
+const waitlisted = registration?.registration?.status === 'WAITLISTED';
 const whatsappCommunityUrl = String(event?.whatsappCommunityUrl || form?.mainEvent?.whatsappCommunityUrl || '').trim();
 ---
 
@@ -29,13 +33,14 @@ const whatsappCommunityUrl = String(event?.whatsappCommunityUrl || form?.mainEve
     <header class="success-header"><a href={`/${institution}`}><img src="/medmind/logo_medmind.svg" alt="MedMind" /></a></header>
     <section class="success-card">
       <img class="mascot" src="/medmind/success-mascot.svg" alt="" aria-hidden="true" />
-      <p class="eyebrow">INSCRIPCIÓN CONFIRMADA</p>
-      <h1>¡Gracias por tu inscripción!</h1>
-      <p class="message">{message}</p>
+      <p class="eyebrow">{waitlisted ? 'LISTA DE ESPERA' : 'INSCRIPCIÓN CONFIRMADA'}</p>
+      <h1>{waitlisted ? 'Estás en lista de espera' : '¡Gracias por tu inscripción!'}</h1>
+      <p class="message">{waitlisted ? 'El aforo está completo. Te avisaremos por correo si se libera un cupo.' : message}</p>
       <div class="event-summary">
         <div class="event-summary-item"><span class="event-icon">▣</span><div><strong>{eventDate ? eventDate.toLocaleDateString('es-PE', { day: 'numeric', month: 'long', year: 'numeric' }) : form.edition?.name || form.title}</strong><small>Fecha del evento</small></div></div>
         <div class="event-summary-item"><span class="event-icon">◷</span><div><strong>{eventDate ? eventDate.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : 'Hora por confirmar'}</strong><small>Hora Perú</small></div></div>
       </div>
+      {token && <a class="back" href={`/${institution}/inscripcion/${token}`}>Ver mi inscripción y enlaces</a>}
       <a class="back" href={`/${institution}/events/${eventId || form.mainEventId}`}>Volver al evento</a>
       {whatsappCommunityUrl && <a class="whatsapp" href={whatsappCommunityUrl} target="_blank" rel="noreferrer">Unirme a la comunidad de WhatsApp</a>}
     </section>

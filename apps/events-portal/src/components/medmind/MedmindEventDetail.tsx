@@ -415,7 +415,8 @@ export function MedmindEventDetail({
       }
       confetti({ particleCount: 130, spread: 70, origin: { y: 0.65 }, colors: ['#0d9488', '#14b8a6', '#ffffff'] });
       if (body.thankYouRedirectUrl) { window.location.assign(body.thankYouRedirectUrl); return; }
-      window.setTimeout(() => window.location.assign(`/${institution}/register/${form.slug}/success?eventId=${encodeURIComponent(event.id)}`), 650);
+      const token = body.registration?.accessToken ? `&token=${encodeURIComponent(body.registration.accessToken)}` : '';
+      window.setTimeout(() => window.location.assign(`/${institution}/register/${form.slug}/success?eventId=${encodeURIComponent(event.id)}${token}`), 650);
     } catch {
       setStatus(
         'Ocurrió un error al enviar el formulario. Por favor intenta de nuevo.'

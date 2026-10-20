@@ -1,0 +1,159 @@
+---
+import PortalLayout from '../../../layouts/PortalLayout.astro';
+import { portalApi } from '../../../lib/api';
+
+// Página personal de la inscripción (flujos 02 y 07): el token único es la credencial, sin login.
+const { institution, token } = Astro.params;
+if (!institution || !token) return new Response('Página no encontrada', { status: 404 });
+Astro.response.headers.set('Cache-Control', 'private, no-store');
+Astro.response.headers.set('Referrer-Policy', 'no-referrer');
+
+let listing: Awaited<ReturnType<typeof portalApi.events>>;
+let view: any;
+try {
+  [listing, view] = await Promise.all([
+    portalApi.events(institution),
+    fetch(`${portalApi.serverApiUrl}/public/registrations/${encodeURIComponent(token)}`).then((response) => (response.ok ? response.json() : Promise.reject())),
+  ]);
+} catch {
+  return new Response('Inscripción no encontrada', { status: 404 });
+}
+if (view.event.organization?.slug !== institution) return new Response('Inscripción no encontrada', { status: 404 });
+
+const STATUS: Record<string, string> = { CONFIRMED: 'Confirmada', PREREGISTERED: 'Preinscrita', WAITLISTED: 'En lista de espera', CANCELLED: 'Cancelada' };
+const MODE: Record<string, string> = { PHYSICAL: 'Presencial', ONLINE: 'Virtual', HYBRID: 'Híbrida' };
+const ROLE: Record<string, string> = { SPEAKER: 'Expositor', CO_SPEAKER: 'Coexpositor', MODERATOR: 'Moderador' };
+const when = (value?: string | null) => (value ? new Date(value).toLocaleString('es-PE', { dateStyle: 'full', timeStyle: 'short', timeZone: 'America/Lima' }) : 'Horario por confirmar');
+const size = (bytes: number) => (bytes > 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`);
+const status = view.registration.status as string;
+---
+
+<PortalLayout organization={listing.organization} title={`Mi inscripción · ${view.event.name}`} bare>
+  <main class="mine">
+    <header>
+      <a href={`/${institution}/events/${view.event.id}`} class="back">← {view.event.name}</a>
+      <h1>Hola, {view.person.firstName}</h1>
+      <p class="muted">Esta es tu página personal para «{view.event.name}». No compartas el enlace: es único para ti.</p>
+      <p><span class={`pill ${status.toLowerCase()}`}>{STATUS[status] ?? status}</span> <span class="muted">{view.person.email} · {view.edition.name}</span></p>
+    </header>
+
+    {status === 'WAITLISTED' && <p class="notice">El aforo está completo. Te avisaremos si se libera un cupo; tus enlaces aparecerán aquí.</p>}
+    {status === 'CANCELLED' && <p class="notice">Esta inscripción fue cancelada.</p>}
+
+    <section>
+      <h2>Programa y enlaces</h2>
+      {view.sessions.length === 0 && <p class="muted">{when(view.edition.startDate ?? view.event.startDate)} · {view.event.venueAddress || MODE[view.event.mode] || ''}</p>}
+      <ul class="list">
+        {view.sessions.map((session: any) => (
+          <li>
+            <div>
+              <strong>{session.title}</strong>
+              <p class="muted">{when(session.startsAt)} · {MODE[session.modality] ?? 'Modalidad del evento'}</p>
+              {session.speakers.length > 0 && <p class="muted">{session.speakers.map((speaker: any) => `${speaker.name} (${ROLE[speaker.role] ?? speaker.role})`).join(', ')}</p>}
+            </div>
+            <div class="actions">
+              {session.joinUrl && <a class="button" href={session.joinUrl} target="_blank" rel="noreferrer">Entrar a Zoom</a>}
+              {!session.joinUrl && session.joinStatus && <span class="muted">Tu enlace de Zoom se está generando</span>}
+              {session.liveUrl && <a class="link" href={session.liveUrl} target="_blank" rel="noreferrer">Ver en Facebook Live</a>}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {view.event.mode !== 'ONLINE' && status === 'CONFIRMED' && <p class="muted">En la sede, tu asistencia se registra con QR o con tu documento.</p>}
+    </section>
+
+    {view.files.length > 0 && (
+      <section>
+        <h2>Materiales y documentos</h2>
+        <ul class="list">
+          {view.files.map((file: any) => (
+            <li>
+              <div>
+                <strong>{file.title}</strong>
+                <p class="muted">{[file.session?.title, file.speaker ? `${file.speaker.firstName ?? ''} ${file.speaker.lastName ?? ''}`.trim() : null, `${file.fileName} · ${size(file.size)}`].filter(Boolean).join(' · ')}</p>
+              </div>
+              <a class="link" href={file.download.url}>Descargar</a>
+            </li>
+          ))}
+        </ul>
+        <p class="muted small">Los enlaces de descarga vencen en minutos; recarga la página si alguno expiró.</p>
+      </section>
+    )}
+
+    {view.certificates.length > 0 && (
+      <section>
+        <h2>Certificados</h2>
+        <ul class="list">
+          {view.certificates.map((certificate: any) => (
+            <li>
+              <div>
+                <strong>{certificate.role ?? 'Participación'}</strong>
+                <p class="muted">Código {certificate.code}{certificate.hours ? ` · ${certificate.hours} horas` : ''} · versión {certificate.version}</p>
+              </div>
+              {certificate.verifyUrl && <a class="link" href={certificate.verifyUrl} target="_blank" rel="noreferrer">Ver y verificar</a>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+
+    <section id="preferences" data-api={portalApi.apiUrl} data-token={token}>
+      <h2>Recordatorios</h2>
+      <label class="row"><input type="checkbox" name="reminders" checked={view.preferences.remindersEnabled} /> Recibir recordatorios antes de cada sesión</label>
+      <fieldset class="row">
+        <legend class="muted">Canal</legend>
+        <label><input type="radio" name="channel" value="EMAIL" checked={view.preferences.channel === 'EMAIL'} /> Correo</label>
+        <label><input type="radio" name="channel" value="TELEGRAM" checked={view.preferences.channel === 'TELEGRAM'} disabled={!view.preferences.telegramLinked} /> Telegram {view.preferences.telegramLinked ? '(enlazado)' : ''}</label>
+      </fieldset>
+      {!view.preferences.telegramLinked && view.preferences.telegramLink && <p><a class="link" href={view.preferences.telegramLink} target="_blank" rel="noreferrer">Enlazar Telegram</a> <span class="muted small">Abre el bot y pulsa «Iniciar».</span></p>}
+      <p class="status" role="status" aria-live="polite"></p>
+      {status !== 'CANCELLED' && <button type="button" class="danger" data-cancel>Cancelar mi inscripción</button>}
+    </section>
+  </main>
+</PortalLayout>
+
+<script>
+  const root = document.querySelector<HTMLElement>('#preferences');
+  if (root) {
+    const api = root.dataset.api;
+    const token = root.dataset.token;
+    const status = root.querySelector<HTMLElement>('.status')!;
+    const save = async (body: Record<string, unknown>) => {
+      status.textContent = 'Guardando…';
+      const response = await fetch(`${api}/public/registrations/${token}/preferences`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      status.textContent = response.ok ? 'Preferencias guardadas.' : 'No se pudieron guardar las preferencias.';
+    };
+    root.querySelector<HTMLInputElement>('input[name="reminders"]')?.addEventListener('change', (event) => void save({ remindersEnabled: (event.target as HTMLInputElement).checked }));
+    root.querySelectorAll<HTMLInputElement>('input[name="channel"]').forEach((input) => input.addEventListener('change', () => void save({ channel: input.value })));
+    root.querySelector<HTMLButtonElement>('[data-cancel]')?.addEventListener('click', async () => {
+      if (!window.confirm('¿Cancelar tu inscripción? Liberarás tu cupo.')) return;
+      const response = await fetch(`${api}/public/registrations/${token}/cancel`, { method: 'POST' });
+      const body = await response.json().catch(() => ({}));
+      if (response.ok) window.location.reload();
+      else status.textContent = body.message || 'No se pudo cancelar.';
+    });
+  }
+</script>
+
+<style>
+  .mine { max-width: 760px; margin: 0 auto; padding: 2rem 1rem 4rem; color: #172033; font-family: system-ui, sans-serif; }
+  header { margin-bottom: 1.5rem; }
+  h1 { font-size: 1.8rem; margin: .75rem 0 .25rem; }
+  h2 { font-size: 1.1rem; margin: 0 0 .75rem; }
+  section { border: 1px solid #e3e8ef; border-radius: 12px; padding: 1.25rem; margin-top: 1rem; background: #fff; }
+  .muted { color: #5f6c7a; font-size: .9rem; margin: .2rem 0; }
+  .small { font-size: .8rem; }
+  .back { color: #0f766e; text-decoration: none; font-size: .9rem; }
+  .pill { display: inline-block; border-radius: 999px; padding: .2rem .7rem; font-size: .8rem; font-weight: 700; background: #e6f6f3; color: #0f766e; }
+  .pill.waitlisted { background: #fff7e6; color: #9a6400; }
+  .pill.cancelled { background: #fdecec; color: #b42318; }
+  .notice { background: #fff7e6; border: 1px solid #f5d18a; border-radius: 10px; padding: .75rem 1rem; }
+  .list { list-style: none; padding: 0; margin: 0; }
+  .list li { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: .75rem 0; border-top: 1px solid #eef1f5; flex-wrap: wrap; }
+  .list li:first-child { border-top: 0; }
+  .actions { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  .button { background: #0f766e; color: #fff; border-radius: 999px; padding: .55rem 1rem; text-decoration: none; font-weight: 600; }
+  .link { color: #0f766e; font-weight: 600; }
+  .row { display: flex; gap: 1rem; align-items: center; margin: .5rem 0; border: 0; padding: 0; flex-wrap: wrap; }
+  .danger { margin-top: 1rem; background: transparent; border: 1px solid #f1b4ae; color: #b42318; border-radius: 999px; padding: .5rem 1rem; cursor: pointer; }
+</style>

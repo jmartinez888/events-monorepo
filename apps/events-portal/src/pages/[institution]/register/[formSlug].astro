@@ -15,7 +15,7 @@ const choicesFor = (field: any): string[] => Array.isArray(field.options?.choice
 try {
   [listing, form] = await Promise.all([
     portalApi.events(institution),
-    fetch(`${portalApi.apiUrl}/public/registration-forms/${encodeURIComponent(formSlug)}`).then((response) =>
+    fetch(`${portalApi.serverApiUrl}/public/registration-forms/${encodeURIComponent(formSlug)}`).then((response) =>
       response.ok ? response.json() : Promise.reject()
     ),
   ]);
@@ -226,7 +226,10 @@ try {
       const submitted = await response.json().catch(() => ({}));
       if (submitted.thankYouRedirectUrl) { window.location.assign(submitted.thankYouRedirectUrl); return; }
       const eventId = submitted.mainEventId || "";
-      window.location.assign(`/${window.location.pathname.split('/').filter(Boolean).slice(0, 3).join('/')}/success${eventId ? `?eventId=${encodeURIComponent(eventId)}` : ""}`);
+      const query = new URLSearchParams();
+      if (eventId) query.set('eventId', eventId);
+      if (submitted.registration?.accessToken) query.set('token', submitted.registration.accessToken);
+      window.location.assign(`/${window.location.pathname.split('/').filter(Boolean).slice(0, 3).join('/')}/success${query.size ? `?${query}` : ""}`);
       if (status) {
         status.textContent = '¡Inscripción confirmada con éxito! Te hemos enviado los detalles por correo.';
         status.className = 'form-status success';
