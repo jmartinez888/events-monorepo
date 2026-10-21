@@ -71,10 +71,8 @@ export function AuthGuard({
   const isGlobalAdmin = ["SUPER_ADMIN", "SAAS_ADMIN"].includes(user.role)
   const isAdminArea = location.pathname === "/admin" || location.pathname.startsWith("/admin/")
 
-  if (isGlobalAdmin && !isAdminArea && location.pathname.startsWith("/dashboard")) {
-    return <Navigate to="/admin" replace />
-  }
-
+  // El administrador global también entra al panel de una institución (crear, gestionar eventos);
+  // /admin queda para la administración de la plataforma.
   if (!isGlobalAdmin && isAdminArea) {
     return <Navigate to="/dashboard/organizations" replace />
   }

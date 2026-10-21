@@ -8,7 +8,13 @@ import { randomBytes } from 'node:crypto';
 @Injectable()
 export class OrganizationsService {
   constructor(private readonly prisma: PrismaService, private readonly auth: AuthService, private readonly mail: MailService) {}
-  list() { return this.prisma.organization.findMany({ include: { subscription: true, branches: true, _count: { select: { members: true, events: true } } }, orderBy: { createdAt: 'desc' } }); }
+  /** SUPER_ADMIN (según la base) ve todas; el resto, solo las instituciones donde es miembro. */
+  async list(actor: { accountId?: string }) {
+    const account = actor?.accountId ? await this.prisma.authUser.findUnique({ where: { id: actor.accountId }, select: { role: true, isActive: true } }) : null;
+    if (!account?.isActive) return [];
+    const where = account.role === 'SUPER_ADMIN' ? undefined : { members: { some: { accountId: actor.accountId } } };
+    return this.prisma.organization.findMany({ where, include: { subscription: true, branches: true, _count: { select: { members: true, events: true } } }, orderBy: { createdAt: 'desc' } });
+  }
   async get(id: string) { const item = await this.prisma.organization.findUnique({ where: { id }, include: { subscription: true, branches: true, members: { include: { profile: true } }, events: true } }); if (!item) throw new NotFoundException('Organización no encontrada'); return item; }
   async create(data: { name: string; slug: string; description?: string }, actor: { accountId: string; role?: string }) {
     const platformAdmin = ['SUPER_ADMIN', 'SAAS_ADMIN'].includes(actor.role ?? '');

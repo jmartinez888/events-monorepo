@@ -8,7 +8,7 @@ class CreateOrganizationDto { @IsString() @MinLength(2) name!: string; @IsString
 @Controller('organizations')
 export class OrganizationsController {
   constructor(private readonly organizations: OrganizationsService) {}
-  @Get() list() { return this.organizations.list(); }
+  @Get() list(@Req() request: any) { return this.organizations.list(request.user); }
   @Get(':id') get(@Param('id') id: string) { return this.organizations.get(id); }
   @Post() create(@Body() dto: CreateOrganizationDto, @Req() request: any) { return this.organizations.create(dto, request.user); }
   @Patch(':id') update(@Param('id') id: string, @Body() body: Record<string, unknown>) { return this.organizations.update(id, body); }
