@@ -34,8 +34,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-import { OrgEmailSettingsModal } from "./OrgEmailSettingsModal"
 import { ShieldCheck, Settings } from "lucide-react"
+
+const MAIL_SETTINGS_URL = "/dashboard/settings/integrations?section=mail"
 
 export function TemplatesListPage() {
   const navigate = useNavigate()
@@ -61,7 +62,6 @@ export function TemplatesListPage() {
     })
   }
 
-  const [openEmailSettings, setOpenEmailSettings] = useState(false)
   const [emailConfigSummary, setEmailConfigSummary] = useState<{ configured: boolean; provider?: string; domain?: string } | null>(null)
 
   // Delete dialog
@@ -138,7 +138,7 @@ export function TemplatesListPage() {
           <div className="flex items-center gap-2.5">
             <Button
               variant="outline"
-              onClick={() => setOpenEmailSettings(true)}
+              onClick={() => navigate(MAIL_SETTINGS_URL)}
               className="rounded-xl h-10 px-3.5 text-xs font-semibold border-border flex items-center gap-2 hover:bg-muted"
             >
               <ShieldCheck className="size-4 text-emerald-600" />
@@ -151,8 +151,8 @@ export function TemplatesListPage() {
             <Button
               onClick={() => {
                 if (!emailConfigSummary?.configured) {
-                  toast.error("Primero debes configurar las credenciales de correo (Resend) de tu institución.")
-                  setOpenEmailSettings(true)
+                  toast.error("Primero configura el correo de tu institución en Integraciones.")
+                  navigate(MAIL_SETTINGS_URL)
                   return
                 }
                 navigate("/dashboard/templates/new")
@@ -222,8 +222,8 @@ export function TemplatesListPage() {
           {templateScope === "library" && <Button
             onClick={() => {
               if (!emailConfigSummary?.configured) {
-                toast.error("Primero debes configurar las credenciales de correo (Resend) de tu institución.")
-                setOpenEmailSettings(true)
+                toast.error("Primero configura el correo de tu institución en Integraciones.")
+                navigate(MAIL_SETTINGS_URL)
                 return
               }
               navigate("/dashboard/templates/new")
@@ -380,15 +380,6 @@ export function TemplatesListPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Email Provider Settings Modal */}
-      <OrgEmailSettingsModal
-        open={openEmailSettings}
-        onOpenChange={setOpenEmailSettings}
-        onSaved={() => {
-          loadEmailSettings()
-          loadTemplates()
-        }}
-      />
     </div>
   )
 }

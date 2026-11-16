@@ -21,7 +21,10 @@ import { useAuthStore } from "@/store/auth.store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { TemplatePickerModal } from "./TemplatePickerModal"
-import { OrgEmailSettingsModal } from "./OrgEmailSettingsModal"
+
+// Se abre en otra pestaña para no perder los cambios de la plantilla.
+const MAIL_SETTINGS_URL = "/dashboard/settings/integrations?section=mail"
+const MAIL_TOAST = { action: { label: "Configurar correo", onClick: () => window.open(MAIL_SETTINGS_URL, "_blank", "noopener") } }
 
 export function TemplateConfigPage() {
   const { templateId } = useParams<{ templateId: string }>()
@@ -49,7 +52,6 @@ export function TemplateConfigPage() {
 
   // Org email settings
   const [orgSettings, setOrgSettings] = useState<any | null>(null)
-  const [openSettingsModal, setOpenSettingsModal] = useState(false)
 
   // Modal Gallery
   const [openPicker, setOpenPicker] = useState(false)
@@ -69,6 +71,15 @@ export function TemplateConfigPage() {
       loadTemplate(templateId)
     }
   }, [templateId, isNew, selectedOrganization?.id])
+
+  // Al volver de configurar el correo en otra pestaña, refleja el nuevo estado.
+  useEffect(() => {
+    const orgId = selectedOrganization?.id
+    if (!orgId) return
+    const refresh = () => { if (document.visibilityState === "visible") loadOrgSettings(orgId) }
+    document.addEventListener("visibilitychange", refresh)
+    return () => document.removeEventListener("visibilitychange", refresh)
+  }, [selectedOrganization?.id])
 
   const loadOrgSettings = async (orgId: string) => {
     try {
@@ -112,12 +123,10 @@ export function TemplateConfigPage() {
       return toast.error("El nombre de la plantilla es obligatorio.")
     }
     if (isNew && !orgSettings?.configured && !orgSettings?.deliveryReady) {
-      setOpenSettingsModal(true)
-      return toast.error("Primero debes configurar las credenciales de correo (Resend) de la institución.")
+      return toast.error("Primero configura el correo de la institución.", MAIL_TOAST)
     }
     if (status === "ACTIVE" && !orgSettings?.deliveryReady) {
-      setOpenSettingsModal(true)
-      return toast.error("Configura y prueba las credenciales institucionales antes de activar una plantilla.")
+      return toast.error("Configura y prueba el correo de la institución antes de activar una plantilla.", MAIL_TOAST)
     }
     if (!senderEmail.trim()) {
       return toast.error("Selecciona o escribe un email remitente autorizado.")
@@ -330,8 +339,8 @@ export function TemplateConfigPage() {
                 <p className="text-xs font-semibold text-foreground">Envío institucional</p>
                 <p className="text-[11px] text-muted-foreground mt-1">{orgSettings?.deliveryReady ? `Credenciales ${orgSettings.defaultProvider} activas. Esta plantilla y las campañas usarán esta configuración.` : "Aún no hay credenciales listas para enviar. Puedes diseñar la plantilla, pero no activarla ni enviarla."}</p>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => setOpenSettingsModal(true)} className="h-8 shrink-0 rounded-lg text-xs">
-                {orgSettings?.deliveryReady ? "Ver configuración" : "Configurar"}
+              <Button asChild variant="outline" size="sm" className="h-8 shrink-0 rounded-lg text-xs">
+                <a href={MAIL_SETTINGS_URL} target="_blank" rel="noopener">{orgSettings?.deliveryReady ? "Ver configuración" : "Configurar"}</a>
               </Button>
             </div>
           </div>
@@ -455,17 +464,6 @@ export function TemplateConfigPage() {
         open={openPicker}
         onOpenChange={setOpenPicker}
         onSelectTemplate={handleSelectFromPicker}
-      />
-
-      {/* Org Email Settings Modal */}
-      <OrgEmailSettingsModal
-        open={openSettingsModal}
-        onOpenChange={setOpenSettingsModal}
-        onSaved={() => {
-          if (selectedOrganization?.id) {
-            loadOrgSettings(selectedOrganization.id)
-          }
-        }}
       />
     </div>
   )

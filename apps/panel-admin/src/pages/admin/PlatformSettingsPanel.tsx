@@ -470,7 +470,7 @@ function FieldControl({ spec, field, draft, section, setValue, setSecret }: { sp
 }
 
 /** Un secreto guardado nunca vuelve al navegador: se reemplaza o se quita, no se edita. */
-function SecretInput({ id, label, stored, pending, generate, onChange }: { id: string; label: string; stored?: { set: boolean; masked: string }; pending?: string; generate?: boolean; onChange: (value: string | undefined) => void }) {
+export function SecretInput({ id, label, stored, pending, generate, removable = true, onChange }: { id: string; label: string; stored?: { set: boolean; masked: string }; pending?: string; generate?: boolean; removable?: boolean; onChange: (value: string | undefined) => void }) {
   const [visible, setVisible] = useState(false)
   const [replacing, setReplacing] = useState(false)
   const removing = pending === "" && !replacing
@@ -498,7 +498,7 @@ function SecretInput({ id, label, stored, pending, generate, onChange }: { id: s
           ) : (
             <>
               <Button type="button" variant="ghost" size="sm" onClick={() => setReplacing(true)}>Cambiar</Button>
-              <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => onChange("")}>Quitar</Button>
+              {removable ? <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => onChange("")}>Quitar</Button> : null}
             </>
           )}
         </div>

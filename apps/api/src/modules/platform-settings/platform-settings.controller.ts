@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpCode, Injectable, Module, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Module, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { OrganizationSettingsAccess } from './organization-access.js';
 import { IsBoolean, IsEmail, IsObject, IsOptional } from 'class-validator';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { PlatformSettingsService } from './platform-settings.service.js';
@@ -58,23 +59,6 @@ export class PlatformSettingsController {
     const result = await this.mail.sendPlatformTest(recipient);
     if (!result.sent) throw new BadRequestException(result.reason || 'No se pudo enviar el correo de prueba');
     return { ok: true, message: `Correo de prueba enviado a ${recipient}` };
-  }
-}
-
-/** Solo OWNER o ADMIN de la institución (o un SUPER_ADMIN) ven y cambian sus integraciones. */
-@Injectable()
-export class OrganizationSettingsAccess {
-  constructor(private readonly prisma: PrismaService) {}
-
-  async assert(organizationId: string, accountId?: string) {
-    if (!accountId) throw new ForbiddenException('Se requiere autenticación');
-    const [account, membership] = await Promise.all([
-      this.prisma.authUser.findUnique({ where: { id: accountId }, select: { role: true, isActive: true } }),
-      this.prisma.organizationMember.findFirst({ where: { organizationId, accountId }, select: { role: true } }),
-    ]);
-    if (!account?.isActive) throw new ForbiddenException('Cuenta inactiva');
-    if (account.role === 'SUPER_ADMIN') return;
-    if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) throw new ForbiddenException('Solo los administradores de la institución pueden configurar sus integraciones');
   }
 }
 
@@ -149,5 +133,5 @@ export class OrganizationIntegrationSettingsController {
   }
 }
 
-@Module({ controllers: [PlatformSettingsController, OrganizationIntegrationSettingsController], providers: [OrganizationSettingsAccess] })
+@Module({ controllers: [PlatformSettingsController, OrganizationIntegrationSettingsController] })
 export class PlatformSettingsAdminModule {}

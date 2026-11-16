@@ -1,6 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ResendWebhooksService } from './resend-webhooks.service.js';
+import { OrganizationAdminGuard } from '../platform-settings/organization-access.js';
 
+@UseGuards(OrganizationAdminGuard)
 @Controller('organizations/:organizationId/email-settings/resend-webhooks')
 export class ResendWebhooksController {
   constructor(private readonly service: ResendWebhooksService) {}
