@@ -6,47 +6,44 @@ import { PlatformSettingsService } from '../../platform-settings/platform-settin
 export interface AttendanceAttendee { id: string; user_name?: string; user_email?: string; document_number?: string | null; registered_at?: string; is_external?: boolean }
 
 /**
- * Sistema de Asistencia del IIAP (attendance-control, flujo 03). Eventos es el
- * dueño del evento; Asistencia guarda un espejo. Se configura en Administración:
- * URL (con /api), token de la cuenta de servicio (rol ADMIN_EVENTO), secreto de
- * firma de marcas entrantes y clave con la que Asistencia registra personas nuevas.
+ * Sistema de Asistencia (attendance-control, flujo 03). Eventos es el dueño del
+ * evento; Asistencia guarda un espejo. Cada institución configura URL (con /api),
+ * token de la cuenta de servicio (rol ADMIN_EVENTO), secreto de firma de marcas
+ * y clave con la que Asistencia registra personas nuevas.
  */
 @Injectable()
 export class AttendanceClient {
   constructor(private readonly settings: PlatformSettingsService) {}
 
-  private get cfg() {
-    return this.settings.get('attendance');
+  private cfg(organizationId: string | null | undefined) {
+    return this.settings.forOrganization(organizationId, 'attendance');
   }
 
-  get configured() {
-    return this.settings.isReady('attendance');
+  configured(organizationId: string | null | undefined) {
+    return this.settings.isReady(organizationId, 'attendance');
   }
 
-  private get base() {
-    return this.cfg.apiUrl.replace(/\/+$/, '');
+  private call<T>(organizationId: string | null | undefined, method: string, path: string, body?: unknown) {
+    const cfg = this.cfg(organizationId);
+    return requestJson<T>(`${cfg.apiUrl.replace(/\/+$/, '')}${path}`, { provider: 'Asistencia', method, body, headers: { Authorization: `Bearer ${cfg.apiToken}` } });
   }
 
-  private call<T>(method: string, path: string, body?: unknown) {
-    return requestJson<T>(`${this.base}${path}`, { provider: 'Asistencia', method, body, headers: { Authorization: `Bearer ${this.cfg.apiToken}` } });
+  createEvent(organizationId: string | null | undefined, input: MirrorEvent) {
+    return this.call<{ id: string }>(organizationId, 'POST', '/events', this.payload(input));
   }
 
-  createEvent(input: MirrorEvent) {
-    return this.call<{ id: string }>('POST', '/events', this.payload(input));
-  }
-
-  updateEvent(externalId: string, input: MirrorEvent) {
-    return this.call<{ id: string }>('PATCH', `/events/${encodeURIComponent(externalId)}`, this.payload(input));
+  updateEvent(organizationId: string | null | undefined, externalId: string, input: MirrorEvent) {
+    return this.call<{ id: string }>(organizationId, 'PATCH', `/events/${encodeURIComponent(externalId)}`, this.payload(input));
   }
 
   /** Lectura completa del espejo: base de la reconciliación al cierre. */
-  getEvent(externalId: string) {
-    return this.call<{ id: string; attendees?: AttendanceAttendee[] }>('GET', `/events/${encodeURIComponent(externalId)}`);
+  getEvent(organizationId: string | null | undefined, externalId: string) {
+    return this.call<{ id: string; attendees?: AttendanceAttendee[] }>(organizationId, 'GET', `/events/${encodeURIComponent(externalId)}`);
   }
 
   /** Prueba de conexión: el servicio responde con el token guardado. */
-  ping() {
-    return this.call<unknown>('GET', '/events?limit=1');
+  ping(organizationId: string | null | undefined) {
+    return this.call<unknown>(organizationId, 'GET', '/events?limit=1');
   }
 
   private payload(input: MirrorEvent) {
@@ -63,14 +60,14 @@ export class AttendanceClient {
   }
 
   /** Firma HMAC-SHA256 hex del cuerpo en X-Attendance-Signature. */
-  verifyWebhook(rawBody: string, signature: string | undefined) {
-    const secret = this.cfg.webhookSecret;
+  verifyWebhook(organizationId: string | null | undefined, rawBody: string, signature: string | undefined) {
+    const secret = this.cfg(organizationId).webhookSecret;
     if (!secret || !signature) return false;
     return safeEqualText(signature.replace(/^sha256=/, ''), hmacHex(secret, rawBody));
   }
 
-  verifyServiceKey(key: string | undefined) {
-    const expected = this.cfg.serviceKey;
+  verifyServiceKey(organizationId: string | null | undefined, key: string | undefined) {
+    const expected = this.cfg(organizationId).serviceKey;
     return !!expected && !!key && safeEqualText(key, expected);
   }
 }

@@ -3,9 +3,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
 import { decryptCredential, encryptCredential, maskSecret } from '../../common/utils/encryption.util.js';
 import { config } from '../../common/config.js';
-import { PLATFORM_SECTIONS, SECTION_KEYS, SectionConfig, SectionKey, defaultsOf, fieldsOf, isSecret } from './platform-settings.schema.js';
+import { ORGANIZATION_SECTION_KEYS, OrganizationSectionKey, PLATFORM_SECTION_KEYS, SectionConfig, SectionKey, defaultsOf, fieldsOf, isSecret } from './platform-settings.schema.js';
 
 interface CachedSection { enabled: boolean; data: Record<string, string | number | boolean>; updatedAt: Date | null; stored: boolean }
+interface StoredRow { key: string; enabled: boolean; values: Prisma.JsonValue; secrets: Prisma.JsonValue; updatedAt: Date }
 
 export interface SectionUpdate {
   enabled?: boolean;
@@ -18,20 +19,22 @@ const REFRESH_MS = 30_000;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /**
- * Configuración global guardada en base de datos. Los clientes de proveedores la
- * leen de forma síncrona desde una caché en memoria que se recarga al guardar y
- * cada 30 s, para que varias réplicas de la API converjan sin reiniciar.
+ * Configuración guardada en base de datos: el correo del sistema (plataforma) y
+ * las integraciones de cada institución. Los clientes la leen de forma síncrona
+ * desde una caché en memoria que se recarga al guardar y cada 30 s, para que
+ * varias réplicas de la API converjan sin reiniciar.
  */
 @Injectable()
 export class PlatformSettingsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PlatformSettingsService.name);
-  private cache = new Map<SectionKey, CachedSection>();
+  private platform = new Map<SectionKey, CachedSection>();
+  private organizations = new Map<string, Map<SectionKey, CachedSection>>();
   private timer?: NodeJS.Timeout;
 
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
-    await this.reload().catch((error) => this.logger.error(`No se pudo cargar la configuración de la plataforma: ${error?.message ?? error}`));
+    await this.reload().catch((error) => this.logger.error(`No se pudo cargar la configuración: ${error?.message ?? error}`));
     this.timer = setInterval(() => void this.reload().catch(() => undefined), REFRESH_MS);
     this.timer.unref?.();
   }
@@ -41,9 +44,16 @@ export class PlatformSettingsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async reload() {
-    const rows = await this.prisma.platformSetting.findMany();
-    const next = new Map<SectionKey, CachedSection>();
-    for (const key of SECTION_KEYS) {
+    const [platformRows, organizationRows] = await Promise.all([this.prisma.platformSetting.findMany(), this.prisma.organizationIntegrationSetting.findMany()]);
+    this.platform = this.build(PLATFORM_SECTION_KEYS, platformRows);
+    const grouped = new Map<string, StoredRow[]>();
+    for (const row of organizationRows) grouped.set(row.organizationId, [...(grouped.get(row.organizationId) ?? []), row]);
+    this.organizations = new Map([...grouped].map(([organizationId, rows]) => [organizationId, this.build(ORGANIZATION_SECTION_KEYS, rows)]));
+  }
+
+  private build(keys: readonly SectionKey[], rows: StoredRow[]) {
+    const result = new Map<SectionKey, CachedSection>();
+    for (const key of keys) {
       const row = rows.find((item) => item.key === key);
       const data = { ...defaultsOf(key) };
       const values = (row?.values ?? {}) as Record<string, unknown>;
@@ -52,63 +62,78 @@ export class PlatformSettingsService implements OnModuleInit, OnModuleDestroy {
         if (isSecret(field)) data[name] = typeof secrets[name] === 'string' ? decryptCredential(secrets[name] as string) : '';
         else if (values[name] !== undefined && values[name] !== null) data[name] = values[name] as string | number | boolean;
       }
-      next.set(key, { enabled: row?.enabled ?? true, data, updatedAt: row?.updatedAt ?? null, stored: !!row });
+      result.set(key, { enabled: row?.enabled ?? true, data, updatedAt: row?.updatedAt ?? null, stored: !!row });
     }
-    this.cache = next;
+    return result;
   }
 
-  /** Configuración efectiva. Una sección desactivada se comporta como vacía. */
-  get<K extends SectionKey>(key: K): SectionConfig<K> {
-    const section = this.cache.get(key);
-    if (!section || !section.enabled) return defaultsOf(key) as SectionConfig<K>;
-    return section.data as SectionConfig<K>;
+  private section(scope: string | null, key: SectionKey) {
+    return scope === null ? this.platform.get(key) : this.organizations.get(scope)?.get(key);
   }
 
-  /** Vista para el panel: valores visibles y, de los secretos, solo si existen y su máscara. */
-  describe() {
-    const api = config.apiPublicUrl();
-    const tracking = (this.get('mail').trackingBaseUrl || api).replace(/\/+$/, '');
-    const endpoints: Record<SectionKey, Record<string, string>> = {
-      mail: { resendWebhook: `${tracking}/email-tracking/provider-events` },
-      zoom: { webhook: `${api}/webhooks/zoom` },
-      facebook: {},
-      attendance: { webhook: `${api}/webhooks/attendance`, personRegistrations: `${api}/integrations/attendance/person-registrations` },
-      certificates: {},
-      telegram: { webhook: `${api}/webhooks/telegram` },
-    };
-    return SECTION_KEYS.map((key) => {
-      const section = this.cache.get(key)!;
-      const values: Record<string, unknown> = {};
-      const secrets: Record<string, { set: boolean; masked: string }> = {};
-      for (const [name, field] of Object.entries(fieldsOf(key))) {
-        const value = section?.data[name];
-        if (isSecret(field)) secrets[name] = { set: !!value, masked: value ? maskSecret(String(value)) : '' };
-        else values[name] = value;
-      }
-      return { key, enabled: section?.enabled ?? true, configured: this.isReady(key), stored: section?.stored ?? false, updatedAt: section?.updatedAt ?? null, values, secrets, endpoints: endpoints[key] };
-    });
+  /** Correo del sistema. Desactivado se comporta como vacío. */
+  get<K extends 'mail'>(key: K): SectionConfig<K> {
+    const section = this.section(null, key);
+    return (section?.enabled ? section.data : defaultsOf(key)) as SectionConfig<K>;
   }
 
-  /** Mínimo para que la integración funcione (las comprobaciones de los clientes usan lo mismo). */
-  isReady(key: SectionKey) {
+  /** Integración de una institución. Sin institución, o desactivada, se comporta como vacía. */
+  forOrganization<K extends OrganizationSectionKey>(organizationId: string | null | undefined, key: K): SectionConfig<K> {
+    const section = organizationId ? this.section(organizationId, key) : undefined;
+    return (section?.enabled ? section.data : defaultsOf(key)) as SectionConfig<K>;
+  }
+
+  /** Mínimo para que el servicio funcione. `scope` null es la plataforma. */
+  isReady(scope: string | null | undefined, key: SectionKey) {
     switch (key) {
       case 'mail': {
         const mail = this.get('mail');
         return mail.provider === 'RESEND' ? !!(mail.resendApiKey && mail.fromEmail) : !!(mail.smtpHost && mail.smtpUser && mail.smtpPass);
       }
-      case 'zoom': { const zoom = this.get('zoom'); return !!(zoom.accountId && zoom.clientId && zoom.clientSecret); }
-      case 'facebook': { const facebook = this.get('facebook'); return !!(facebook.pageId && facebook.pageAccessToken); }
-      case 'attendance': { const attendance = this.get('attendance'); return !!(attendance.apiUrl && attendance.apiToken); }
-      case 'certificates': { const certificates = this.get('certificates'); return !!(certificates.apiUrl && certificates.apiKey); }
-      case 'telegram': { const telegram = this.get('telegram'); return !!(telegram.botToken && telegram.botUsername); }
+      case 'zoom': { const zoom = this.forOrganization(scope, 'zoom'); return !!(zoom.accountId && zoom.clientId && zoom.clientSecret); }
+      case 'facebook': { const facebook = this.forOrganization(scope, 'facebook'); return !!(facebook.pageId && facebook.pageAccessToken); }
+      case 'attendance': { const attendance = this.forOrganization(scope, 'attendance'); return !!(attendance.apiUrl && attendance.apiToken); }
+      case 'certificates': { const certificates = this.forOrganization(scope, 'certificates'); return !!(certificates.apiUrl && certificates.apiKey); }
+      case 'telegram': { const telegram = this.forOrganization(scope, 'telegram'); return !!(telegram.botToken && telegram.botUsername); }
     }
   }
 
-  async update(key: string, input: SectionUpdate, accountId?: string) {
-    if (!(key in PLATFORM_SECTIONS)) throw new NotFoundException('Sección de configuración desconocida');
+  /** Vista para el panel: valores visibles y, de los secretos, solo si existen y su máscara. */
+  describe(scope: string | null) {
+    const api = config.apiPublicUrl();
+    const keys: readonly SectionKey[] = scope === null ? PLATFORM_SECTION_KEYS : ORGANIZATION_SECTION_KEYS;
+    const org = scope ? encodeURIComponent(scope) : '';
+    const endpoints: Record<SectionKey, Record<string, string>> = {
+      mail: { resendWebhook: `${(this.get('mail').trackingBaseUrl || api).replace(/\/+$/, '')}/email-tracking/provider-events` },
+      zoom: { webhook: `${api}/webhooks/zoom/${org}` },
+      facebook: {},
+      attendance: { webhook: `${api}/webhooks/attendance/${org}`, personRegistrations: `${api}/integrations/attendance/${org}/person-registrations` },
+      certificates: {},
+      telegram: { webhook: `${api}/webhooks/telegram/${org}` },
+    };
+    return keys.map((key) => {
+      const section = this.section(scope, key);
+      const data = section?.data ?? defaultsOf(key);
+      const values: Record<string, unknown> = {};
+      const secrets: Record<string, { set: boolean; masked: string }> = {};
+      for (const [name, field] of Object.entries(fieldsOf(key))) {
+        const value = data[name];
+        if (isSecret(field)) secrets[name] = { set: !!value, masked: value ? maskSecret(String(value)) : '' };
+        else values[name] = value;
+      }
+      return { key, enabled: section?.enabled ?? true, configured: this.isReady(scope, key), stored: section?.stored ?? false, updatedAt: section?.updatedAt ?? null, values, secrets, endpoints: endpoints[key] };
+    });
+  }
+
+  /** `scope` null guarda el correo del sistema; un id guarda la integración de esa institución. */
+  async update(scope: string | null, key: string, input: SectionUpdate, accountId?: string) {
+    const allowed: readonly string[] = scope === null ? PLATFORM_SECTION_KEYS : ORGANIZATION_SECTION_KEYS;
+    if (!allowed.includes(key)) throw new NotFoundException('Sección de configuración desconocida');
     const section = key as SectionKey;
     const fields = fieldsOf(section);
-    const current = await this.prisma.platformSetting.findUnique({ where: { key: section } });
+    const current = scope === null
+      ? await this.prisma.platformSetting.findUnique({ where: { key: section } })
+      : await this.prisma.organizationIntegrationSetting.findUnique({ where: { organizationId_key: { organizationId: scope, key: section } } });
     const values = { ...((current?.values ?? {}) as Record<string, unknown>) };
     const secrets = { ...((current?.secrets ?? {}) as Record<string, unknown>) };
 
@@ -126,14 +151,12 @@ export class PlatformSettingsService implements OnModuleInit, OnModuleDestroy {
       else delete secrets[name];
     }
 
-    await this.prisma.platformSetting.upsert({
-      where: { key: section },
-      create: { key: section, enabled: input.enabled ?? true, values: values as Prisma.InputJsonValue, secrets: secrets as Prisma.InputJsonValue, updatedBy: accountId },
-      update: { enabled: input.enabled ?? current?.enabled ?? true, values: values as Prisma.InputJsonValue, secrets: secrets as Prisma.InputJsonValue, updatedBy: accountId },
-    });
+    const data = { enabled: input.enabled ?? current?.enabled ?? true, values: values as Prisma.InputJsonValue, secrets: secrets as Prisma.InputJsonValue, updatedBy: accountId };
+    if (scope === null) await this.prisma.platformSetting.upsert({ where: { key: section }, create: { key: section, ...data }, update: data });
+    else await this.prisma.organizationIntegrationSetting.upsert({ where: { organizationId_key: { organizationId: scope, key: section } }, create: { organizationId: scope, key: section, ...data }, update: data });
     await this.reload();
-    this.logger.log(`Configuración "${section}" actualizada`);
-    return this.describe().find((item) => item.key === section)!;
+    this.logger.log(`Configuración "${section}" actualizada (${scope ?? 'plataforma'})`);
+    return this.describe(scope).find((item) => item.key === section)!;
   }
 
   private normalize(name: string, field: ReturnType<typeof fieldsOf>[string], raw: unknown) {

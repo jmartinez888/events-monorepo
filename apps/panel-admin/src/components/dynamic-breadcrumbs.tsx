@@ -15,6 +15,7 @@ const routeMap: Record<string, string> = {
   organizations: "Organizaciones",
   settings: "Ajustes",
   business: "Organización",
+  integrations: "Integraciones",
   new: "Nuevo Evento",
   edit: "Editar",
   login: "Iniciar Sesión",
@@ -29,6 +30,7 @@ const validRoutes = new Set([
   "/dashboard/events",
   "/dashboard/organizations",
   "/dashboard/settings/business",
+  "/dashboard/settings/integrations",
 ]);
 
 export function DynamicBreadcrumbs() {

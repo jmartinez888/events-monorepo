@@ -320,7 +320,16 @@ export const api = {
       apiFetch<PlatformSection>(`/admin/settings/${section}`, { method: "PATCH", body: JSON.stringify(data) }),
     test: (section: PlatformSectionKey, recipient?: string) =>
       apiFetch<{ ok: boolean; message: string }>(`/admin/settings/${section}/test`, { method: "POST", body: JSON.stringify(recipient ? { recipient } : {}) }),
-    registerTelegramWebhook: () => apiFetch<{ ok: boolean; message: string }>("/admin/settings/telegram/register-webhook", { method: "POST" }),
+  },
+  /** Integraciones propias de cada institución (Zoom, Facebook Live, Asistencia, Certificados, Telegram). */
+  organizationIntegrations: {
+    list: (organizationId: string) => apiFetch<PlatformSection[]>(`/organizations/${organizationId}/integration-settings`),
+    save: (organizationId: string, section: PlatformSectionKey, data: { enabled?: boolean; values?: Record<string, unknown>; secrets?: Record<string, string> }) =>
+      apiFetch<PlatformSection>(`/organizations/${organizationId}/integration-settings/${section}`, { method: "PATCH", body: JSON.stringify(data) }),
+    test: (organizationId: string, section: PlatformSectionKey) =>
+      apiFetch<{ ok: boolean; message: string }>(`/organizations/${organizationId}/integration-settings/${section}/test`, { method: "POST" }),
+    registerTelegramWebhook: (organizationId: string) =>
+      apiFetch<{ ok: boolean; message: string }>(`/organizations/${organizationId}/integration-settings/telegram/register-webhook`, { method: "POST" }),
   },
   integrations: {
     overview: (eventId: string) => apiFetch<IntegrationsOverview>(`/events/${eventId}/integrations`),

@@ -67,6 +67,7 @@ export function OrgEmailSettingsModal({
   const [smtpPass, setSmtpPass] = useState("")
   const [showSmtpPass, setShowSmtpPass] = useState(false)
   const [smtpFromEmail, setSmtpFromEmail] = useState("")
+  const [replyTo, setReplyTo] = useState("")
   const [smtpFromName, setSmtpFromName] = useState("")
 
   // Additional Senders
@@ -111,6 +112,7 @@ export function OrgEmailSettingsModal({
       setSmtpPass(data.smtpPassMasked || "")
       setSmtpFromEmail(data.smtpFromEmail || "")
       setSmtpFromName(data.smtpFromName || selectedOrganization?.name || "Eventos")
+      setReplyTo(data.replyTo || "")
 
       if (data.verifiedSenders && Array.isArray(data.verifiedSenders)) {
         setVerifiedSenders(data.verifiedSenders)
@@ -226,6 +228,7 @@ export function OrgEmailSettingsModal({
         smtpPass: smtpPass.trim() || undefined,
         smtpFromEmail: smtpFromEmail.trim() || undefined,
         smtpFromName: smtpFromName.trim() || undefined,
+        replyTo: replyTo.trim(),
         verifiedSenders,
         isActive: true,
       }
@@ -499,7 +502,7 @@ export function OrgEmailSettingsModal({
                 {/* Default From Email */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-foreground">
-                    Correo Remitente Predeterminado (From Email)
+                    Alias de envío (De:)
                   </label>
                   <Input
                     value={resendFromEmail}
@@ -680,17 +683,33 @@ export function OrgEmailSettingsModal({
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-xs font-semibold text-foreground">Correo Remitente (From)</label>
+                    <label className="text-xs font-semibold text-foreground">Alias de envío (De:)</label>
                     <Input
                       value={smtpFromEmail}
                       onChange={(e) => setSmtpFromEmail(e.target.value)}
-                      placeholder=""
+                      placeholder={smtpUser || "eventos@institucion.gob.pe"}
                       className="h-10 rounded-xl text-xs bg-muted/20 border-border"
                     />
+                    <p className="text-[10px] text-muted-foreground">
+                      Puede ser distinto de la cuenta SMTP si esa cuenta tiene permiso para enviar como este alias (en Gmail: «Enviar como»).
+                    </p>
                   </div>
                 </div>
               </div>
             )}
+
+            <div className="space-y-1.5">
+              <label htmlFor="org-mail-reply-to" className="text-xs font-semibold text-foreground">Responder a</label>
+              <Input
+                id="org-mail-reply-to"
+                type="email"
+                value={replyTo}
+                onChange={(e) => setReplyTo(e.target.value)}
+                placeholder="informes@institucion.gob.pe"
+                className="h-10 rounded-xl text-xs bg-muted/20 border-border"
+              />
+              <p className="text-[10px] text-muted-foreground">Opcional. Las respuestas de los destinatarios llegan a esta dirección en lugar del alias.</p>
+            </div>
 
             {/* Test Connection Box */}
             <div className="rounded-2xl border border-dashed border-border bg-muted/10 p-4 space-y-3">

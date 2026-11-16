@@ -52,9 +52,9 @@ export function buildServices(overrides = {}) {
   process.env.NOTIFICATIONS_WORKER = 'false';
   const prisma = new PrismaService();
   const mail = overrides.mail ?? fakeMail();
-  const telegram = overrides.telegram ?? { configured: false, deepLink: () => null, sendMessage: async () => undefined, verifyWebhook: () => false };
-  const zoom = overrides.zoom ?? { configured: false };
-  const external = overrides.certificatesClient ?? { configured: false };
+  const telegram = overrides.telegram ?? { configured: () => false, deepLink: () => null, sendMessage: async () => undefined, verifyWebhook: () => false };
+  const zoom = overrides.zoom ?? { configured: () => false };
+  const external = overrides.certificatesClient ?? { configured: () => false };
   const platform = overrides.platform ?? { get: () => ({ organizationFallback: false }), isReady: () => false };
   const directory = new DirectoryService();
   const access = new EventAccessService(prisma);
@@ -71,7 +71,7 @@ export function buildServices(overrides = {}) {
   const certificates = new CertificatesService(prisma, access, attendance, notifications, jobs, external);
   certificates.onModuleInit();
   const forms = new RegistrationFormsService(prisma, { enrollRegistration: async () => ({ enrolled: 0 }) }, mail, registrations, notifications);
-  const sync = new SessionSyncService(prisma, jobs, zoom, { configured: false }, { configured: false }, attendance, registrations, notifications);
+  const sync = new SessionSyncService(prisma, jobs, zoom, { configured: () => false }, { configured: () => false }, attendance, registrations, notifications);
   sync.onModuleInit();
   const reviews = new DirectoryReviewsService(prisma, access);
   const codes = new VerificationCodesService(prisma);

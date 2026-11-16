@@ -1,7 +1,9 @@
 /**
- * Secciones de configuración global editables desde Administración > Configuración.
- * Sustituyen a las variables de entorno SMTP_*, RESEND_*, ZOOM_*, FACEBOOK_*,
- * ATTENDANCE_*, CERTIFICATES_*, TELEGRAM_*, EMAIL_TRACKING_BASE_URL y MAIL_SYSTEM_FALLBACK.
+ * Configuración editable desde el panel en lugar de variables de entorno.
+ * - `mail` (alcance plataforma): correo del sistema para cuentas (códigos, contraseñas).
+ *   Lo edita un SUPER_ADMIN en Administración > Configuración.
+ * - El resto (alcance institución): cada institución configura sus propias
+ *   integraciones en Configuración > Integraciones.
  * Los campos `secret` se guardan cifrados y nunca vuelven al navegador.
  */
 type FieldDef =
@@ -9,7 +11,7 @@ type FieldDef =
   | { type: 'number'; default: number; min: number; max: number }
   | { type: 'boolean'; default: boolean };
 
-export const PLATFORM_SECTIONS = {
+export const SETTINGS_SECTIONS = {
   mail: {
     provider: { type: 'string', default: 'SMTP', options: ['SMTP', 'RESEND'] },
     smtpHost: { type: 'string', default: '' },
@@ -24,7 +26,7 @@ export const PLATFORM_SECTIONS = {
     fromName: { type: 'string', default: 'Eventos IIAP' },
     replyTo: { type: 'string', default: '', format: 'email' },
     trackingBaseUrl: { type: 'string', default: '', format: 'url' },
-    organizationFallback: { type: 'boolean', default: true },
+    organizationFallback: { type: 'boolean', default: false },
   },
   zoom: {
     accountId: { type: 'string', default: '' },
@@ -56,14 +58,16 @@ export const PLATFORM_SECTIONS = {
   },
 } as const satisfies Record<string, Record<string, FieldDef>>;
 
-export type SectionKey = keyof typeof PLATFORM_SECTIONS;
-export const SECTION_KEYS = Object.keys(PLATFORM_SECTIONS) as SectionKey[];
+export type SectionKey = keyof typeof SETTINGS_SECTIONS;
+export type OrganizationSectionKey = Exclude<SectionKey, 'mail'>;
+export const PLATFORM_SECTION_KEYS = ['mail'] as const satisfies readonly SectionKey[];
+export const ORGANIZATION_SECTION_KEYS = ['zoom', 'facebook', 'attendance', 'certificates', 'telegram'] as const satisfies readonly OrganizationSectionKey[];
 
 type ValueOf<F> = F extends { type: 'number' } ? number : F extends { type: 'boolean' } ? boolean : string;
-export type SectionConfig<K extends SectionKey> = { -readonly [F in keyof (typeof PLATFORM_SECTIONS)[K]]: ValueOf<(typeof PLATFORM_SECTIONS)[K][F]> };
+export type SectionConfig<K extends SectionKey> = { -readonly [F in keyof (typeof SETTINGS_SECTIONS)[K]]: ValueOf<(typeof SETTINGS_SECTIONS)[K][F]> };
 
 export function fieldsOf(key: SectionKey): Record<string, FieldDef> {
-  return PLATFORM_SECTIONS[key] as Record<string, FieldDef>;
+  return SETTINGS_SECTIONS[key] as Record<string, FieldDef>;
 }
 
 export function isSecret(field: FieldDef) {

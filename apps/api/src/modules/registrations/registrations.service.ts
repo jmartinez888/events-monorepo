@@ -185,7 +185,7 @@ export class RegistrationsService {
         channel: preference.channel,
         remindersEnabled: preference.remindersEnabled,
         telegramLinked: !!preference.telegramChatId,
-        telegramLink: this.telegram.deepLink(preference.telegramLinkToken),
+        telegramLink: this.telegram.deepLink(event.organizationId, preference.telegramLinkToken),
       },
     };
   }

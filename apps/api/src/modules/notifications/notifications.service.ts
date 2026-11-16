@@ -112,7 +112,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Procesa /start <token> y /stop del bot. */
-  async handleTelegramUpdate(update: any) {
+  async handleTelegramUpdate(organizationId: string, update: any) {
     const message = update?.message;
     const chatId = message?.chat?.id ? String(message.chat.id) : null;
     const text = typeof message?.text === 'string' ? message.text.trim() : '';
@@ -121,20 +121,20 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     if (command === '/start' && argument && /^[0-9a-f-]{36}$/i.test(argument)) {
       const preference = await this.prisma.notificationPreference.findUnique({ where: { telegramLinkToken: argument } });
       if (!preference) {
-        await this.telegram.sendMessage(chatId, 'El enlace no es válido o ya fue usado. Ábrelo de nuevo desde tu página de inscripción.');
+        await this.telegram.sendMessage(organizationId, chatId, 'El enlace no es válido o ya fue usado. Ábrelo de nuevo desde tu página de inscripción.');
         return { handled: true };
       }
       // Se rota el token: un enlace compartido no permite secuestrar el canal después.
       await this.prisma.notificationPreference.update({ where: { id: preference.id }, data: { telegramChatId: chatId, telegramLinkedAt: new Date(), channel: 'TELEGRAM', telegramLinkToken: randomUUID() } });
-      await this.telegram.sendMessage(chatId, '✅ Listo. Recibirás aquí las confirmaciones y recordatorios de tus eventos. Escribe /stop para dejar de recibir recordatorios.');
+      await this.telegram.sendMessage(organizationId, chatId, '✅ Listo. Recibirás aquí las confirmaciones y recordatorios de tus eventos. Escribe /stop para dejar de recibir recordatorios.');
       return { handled: true };
     }
     if (command === '/stop') {
       await this.prisma.notificationPreference.updateMany({ where: { telegramChatId: chatId }, data: { remindersEnabled: false } });
-      await this.telegram.sendMessage(chatId, 'Recordatorios desactivados. Puedes reactivarlos desde tu página de inscripción.');
+      await this.telegram.sendMessage(organizationId, chatId, 'Recordatorios desactivados. Puedes reactivarlos desde tu página de inscripción.');
       return { handled: true };
     }
-    await this.telegram.sendMessage(chatId, 'Para enlazar este chat, usa el botón de Telegram de tu página de inscripción.');
+    await this.telegram.sendMessage(organizationId, chatId, 'Para enlazar este chat, usa el botón de Telegram de tu página de inscripción.');
     return { handled: true };
   }
 
@@ -182,9 +182,9 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const email = notification.profile.primaryEmail || notification.profile.authUser?.email || asStrings(notification.profile.additionalEmails)[0];
     const errors: string[] = [];
 
-    if (preference?.channel === 'TELEGRAM' && preference.telegramChatId && this.telegram.configured) {
+    if (preference?.channel === 'TELEGRAM' && preference.telegramChatId && this.telegram.configured(notification.event.organizationId)) {
       try {
-        await this.telegram.sendMessage(preference.telegramChatId, content.telegram);
+        await this.telegram.sendMessage(notification.event.organizationId, preference.telegramChatId, content.telegram);
         await finish({ status: 'SENT', channel: 'TELEGRAM', sentAt: new Date(), lastError: null });
         return true;
       } catch (error: any) {

@@ -951,6 +951,24 @@ export function OrganizationSettingsPage() {
           </div>
         )}
 
+        <div className="mb-6 border border-border rounded-xl bg-card overflow-hidden shadow-sm">
+          <div className="p-6 flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h4 className="font-semibold text-base text-foreground font-sans">Integraciones</h4>
+              <p className="text-xs text-muted-foreground font-sans">
+                Correo, Zoom, Facebook Live, Asistencia, Certificados y Telegram propios de esta institución.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate("/dashboard/settings/integrations")}
+              className="border border-border hover:bg-muted text-foreground px-3.5 py-2 rounded-lg text-xs font-semibold select-none transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring font-sans"
+            >
+              Configurar integraciones
+            </button>
+          </div>
+        </div>
+
         {/* Card Container faithful to the mockup */}
         <div className="border border-border rounded-xl bg-card overflow-hidden shadow-sm">
           {/* Header Row */}

@@ -271,7 +271,7 @@ describe('certificados por rol', () => {
 
   test('con el sistema de Certificados configurado, un fallo transitorio se reintenta y luego emite una sola vez', async () => {
     let calls = 0;
-    const flaky = { configured: true, issue: async (request) => { calls++; if (calls === 1) throw new RetryableError('Certificados respondió 503'); return { id: `ext-${request.idempotencyKey}`, code: `EXT-${randomUUID().slice(0, 8)}`, status: 'ISSUED', verifyUrl: 'https://certificados.example/v/1' }; } };
+    const flaky = { configured: () => true, issue: async (_organizationId, request) => { calls++; if (calls === 1) throw new RetryableError('Certificados respondió 503'); return { id: `ext-${request.idempotencyKey}`, code: `EXT-${randomUUID().slice(0, 8)}`, status: 'ISSUED', verifyUrl: 'https://certificados.example/v/1' }; } };
     const local = buildServices({ certificatesClient: flaky, mail });
     const role = await prisma.participantRole.create({ data: { mainEventId: event.id, name: `ponente_${randomUUID().slice(0, 4)}`, requiresAttendance: false, certificateHours: 2 } });
     await prisma.participantRoleAssignment.create({ data: { participantId: organizer.id, roleId: role.id } });

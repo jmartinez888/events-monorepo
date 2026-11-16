@@ -339,16 +339,16 @@ model Profile {
 }
 
 model Organization {
-  id                   String                     @id @default(uuid()) @db.Uuid
+  id                   String                           @id @default(uuid()) @db.Uuid
   name                 String
-  slug                 String                     @unique
+  slug                 String                           @unique
   description          String?
-  organizationType     String?                    @map("organization_type")
-  logoUrl              String?                    @map("logo_url")
-  coverUrl             String?                    @map("cover_url")
-  createdAt            DateTime                   @default(now()) @map("created_at")
-  updatedAt            DateTime                   @updatedAt @map("updated_at")
-  isActive             Boolean                    @default(true) @map("is_active")
+  organizationType     String?                          @map("organization_type")
+  logoUrl              String?                          @map("logo_url")
+  coverUrl             String?                          @map("cover_url")
+  createdAt            DateTime                         @default(now()) @map("created_at")
+  updatedAt            DateTime                         @updatedAt @map("updated_at")
+  isActive             Boolean                          @default(true) @map("is_active")
   members              OrganizationMember[]
   profiles             Profile[]
   branches             OrganizationBranch[]
@@ -357,6 +357,7 @@ model Organization {
   emailTemplates       EmailTemplate[]
   emailSections        EmailSection[]
   emailSettings        OrganizationEmailSettings?
+  integrationSettings  OrganizationIntegrationSetting[]
   marketingContacts    MarketingContact[]
   marketingSegments    MarketingSegment[]
   marketingCampaigns   MarketingCampaign[]
@@ -1052,6 +1053,8 @@ model OrganizationEmailSettings {
   smtpPassEncrypted String? @map("smtp_pass_encrypted")
   smtpFromEmail     String? @map("smtp_from_email")
   smtpFromName      String? @map("smtp_from_name")
+  /// Dirección a la que llegan las respuestas; el alias de envío es resendFromEmail / smtpFromEmail.
+  replyTo           String? @map("reply_to")
 
   // Verified / configured senders catalog
   verifiedSenders Json?        @map("verified_senders")
@@ -1420,8 +1423,8 @@ model DirectoryReview {
   @@map("directory_reviews")
 }
 
-/// Configuración global de la plataforma editable desde Administración > Configuración.
-/// Una fila por sección (mail, zoom, facebook, attendance, certificates, telegram).
+/// Configuración global de la plataforma (solo el correo del sistema: códigos de acceso y contraseñas).
+/// Las integraciones de cada institución viven en OrganizationIntegrationSetting.
 /// `values` guarda los campos visibles; `secrets` guarda los campos sensibles cifrados (AES-256-GCM).
 model PlatformSetting {
   key       String   @id
@@ -1433,4 +1436,21 @@ model PlatformSetting {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("platform_settings")
+}
+
+/// Integraciones de cada institución (zoom, facebook, attendance, certificates, telegram),
+/// editables por sus OWNER/ADMIN. `secrets` guarda los campos sensibles cifrados.
+model OrganizationIntegrationSetting {
+  organizationId String       @map("organization_id") @db.Uuid
+  key            String
+  enabled        Boolean      @default(true)
+  values         Json         @default("{}")
+  secrets        Json         @default("{}")
+  updatedBy      String?      @map("updated_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, key])
+  @@map("organization_integration_settings")
 }

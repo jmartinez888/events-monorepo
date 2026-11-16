@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import type { ComponentType, FormEvent } from "react"
+import type { ComponentType, FormEvent, ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { Award, Check, Copy, Eye, EyeOff, Loader2, Mail, PlugZap, QrCode, Radio, Send, Video, WandSparkles } from "lucide-react"
 import { toast } from "sonner"
@@ -17,10 +17,21 @@ interface SectionSpec { key: PlatformSectionKey; title: string; icon: ComponentT
 type Values = Record<string, string | number | boolean>
 interface Draft { enabled: boolean; values: Values; secrets: Record<string, string> }
 
+/** De dónde se lee y dónde se guarda: la plataforma (admin global) o una institución. */
+export interface SettingsAdapter {
+  list: () => Promise<PlatformSection[]>
+  save: (key: PlatformSectionKey, data: { enabled?: boolean; values?: Record<string, unknown>; secrets?: Record<string, string> }) => Promise<PlatformSection>
+  test: (key: PlatformSectionKey, recipient?: string) => Promise<{ ok: boolean; message: string }>
+  registerTelegramWebhook?: () => Promise<{ ok: boolean; message: string }>
+}
+
+/** Entrada de la lista que no usa el formulario genérico (p. ej. el correo de la institución). */
+export interface CustomEntry { key: string; title: string; icon: ComponentType<{ className?: string }>; status: { label: string; tone: string }; content: ReactNode }
+
 const SECTIONS: SectionSpec[] = [
   {
-    key: "mail", title: "Correo", icon: Mail, testable: true,
-    summary: "Cuenta con la que la plataforma envía códigos de acceso, credenciales, recordatorios y certificados.",
+    key: "mail", title: "Correo del sistema", icon: Mail, testable: true,
+    summary: "Envía los códigos de acceso, contraseñas temporales y avisos de cuenta, que no pertenecen a ninguna institución. Los correos de cada evento salen con el correo de su institución.",
     groups: [
       {
         title: "Remitente", description: "Lo que ven las personas al recibir un correo.",
@@ -50,7 +61,7 @@ const SECTIONS: SectionSpec[] = [
         fields: [
           { name: "trackingBaseUrl", label: "URL pública de seguimiento", kind: "url", placeholder: "https://eventos-api.iiap.gob.pe/api", hint: "Base de los enlaces de apertura, clic y baja. Vacía usa la URL pública de la API." },
           { name: "resendWebhookSecret", label: "Secreto del webhook de Resend", kind: "secret", hint: "Valida los avisos de entrega, rebote y apertura." },
-          { name: "organizationFallback", label: "Usar este correo si una institución no tiene el suyo", kind: "switch", wide: true, hint: "Si se desactiva, los avisos de una institución sin correo propio no se envían." },
+          { name: "organizationFallback", label: "Usar este correo si una institución no tiene el suyo", kind: "switch", wide: true, hint: "Desactivado, los avisos de una institución sin correo propio no se envían hasta que lo configure." },
         ],
       },
     ],
@@ -172,16 +183,28 @@ function status(section?: PlatformSection) {
   return { label: section.stored ? "Incompleto" : "Sin configurar", tone: "bg-amber-500" }
 }
 
+/** Correo del sistema: solo SUPER_ADMIN, en Administración › Configuración. */
 export function PlatformSettingsPanel() {
+  const adapter = useMemo<SettingsAdapter>(() => ({ list: api.platformSettings.list, save: api.platformSettings.save, test: api.platformSettings.test }), [])
+  return <SettingsPanel adapter={adapter} keys={["mail"]} />
+}
+
+/**
+ * Lista de servicios + formulario del seleccionado. `keys` decide qué secciones
+ * muestra; `custom` agrega entradas propias al inicio de la lista.
+ */
+export function SettingsPanel({ adapter, keys, custom = [] }: { adapter: SettingsAdapter; keys: PlatformSectionKey[]; custom?: CustomEntry[] }) {
   const [params, setParams] = useSearchParams()
   const [sections, setSections] = useState<PlatformSection[]>([])
   const [drafts, setDrafts] = useState<Partial<Record<PlatformSectionKey, Draft>>>({})
   const [loading, setLoading] = useState(true)
-  const active = (SECTIONS.find((item) => item.key === params.get("section"))?.key ?? "mail") as PlatformSectionKey
+  const specs = SECTIONS.filter((item) => keys.includes(item.key))
+  const entries = [...custom.map((item) => item.key), ...specs.map((item) => item.key)]
+  const active = entries.find((key) => key === params.get("section")) ?? entries[0]
 
   useEffect(() => {
     let cancelled = false
-    api.platformSettings.list()
+    adapter.list()
       .then((data) => {
         if (cancelled) return
         setSections(data)
@@ -190,25 +213,38 @@ export function PlatformSettingsPanel() {
       .catch((error) => { if (!cancelled) toast.error(errorText(error, "No se pudo cargar la configuración")) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [adapter])
 
   const byKey = useMemo(() => Object.fromEntries(sections.map((item) => [item.key, item])) as Partial<Record<PlatformSectionKey, PlatformSection>>, [sections])
-  const spec = SECTIONS.find((item) => item.key === active)!
-  const section = byKey[active]
-  const draft = drafts[active]
+  const customEntry = custom.find((item) => item.key === active)
+  const spec = specs.find((item) => item.key === active)
+  const section = spec ? byKey[spec.key] : undefined
+  const draft = spec ? drafts[spec.key] : undefined
 
   const replace = (updated: PlatformSection) => {
     setSections((current) => current.map((item) => item.key === updated.key ? updated : item))
     setDrafts((current) => ({ ...current, [updated.key]: toDraft(updated) }))
   }
 
+  const content = customEntry ? customEntry.content
+    : loading || !spec || !section || !draft ? <Card className="flex items-center gap-3 p-8 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Cargando configuración…</Card>
+    : <SectionForm key={spec.key} adapter={adapter} spec={spec} section={section} draft={draft} onDraft={(next) => setDrafts((current) => ({ ...current, [spec.key]: next }))} onSaved={replace} />
+
+  // Una sola sección no necesita lista lateral.
+  if (entries.length === 1) return content
+
+  const navItems = [
+    ...custom.map((item) => ({ key: item.key, title: item.title, icon: item.icon, state: item.status, pending: false })),
+    ...specs.map((item) => ({ key: item.key, title: item.title, icon: item.icon, state: status(byKey[item.key]), pending: !!(byKey[item.key] && drafts[item.key] && isDirty(byKey[item.key]!, drafts[item.key]!)) })),
+  ]
+
   return (
     <div className="grid gap-6 lg:grid-cols-[15rem_1fr]">
       <nav aria-label="Servicios" className="flex gap-1 overflow-x-auto pb-1 lg:flex-col lg:overflow-visible lg:pb-0">
-        {SECTIONS.map((item) => {
-          const state = status(byKey[item.key])
+        {navItems.map((item) => {
+          const state = item.state
           const current = item.key === active
-          const pending = byKey[item.key] && drafts[item.key] && isDirty(byKey[item.key]!, drafts[item.key]!)
+          const pending = item.pending
           return (
             <button
               key={item.key}
@@ -233,16 +269,12 @@ export function PlatformSettingsPanel() {
         })}
       </nav>
 
-      {loading || !section || !draft ? (
-        <Card className="flex items-center gap-3 p-8 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin" />Cargando configuración…</Card>
-      ) : (
-        <SectionForm key={active} spec={spec} section={section} draft={draft} onDraft={(next) => setDrafts((current) => ({ ...current, [active]: next }))} onSaved={replace} />
-      )}
+      <div className="min-w-0">{content}</div>
     </div>
   )
 }
 
-function SectionForm({ spec, section, draft, onDraft, onSaved }: { spec: SectionSpec; section: PlatformSection; draft: Draft; onDraft: (draft: Draft) => void; onSaved: (section: PlatformSection) => void }) {
+function SectionForm({ adapter, spec, section, draft, onDraft, onSaved }: { adapter: SettingsAdapter; spec: SectionSpec; section: PlatformSection; draft: Draft; onDraft: (draft: Draft) => void; onSaved: (section: PlatformSection) => void }) {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [recipient, setRecipient] = useState("")
@@ -261,7 +293,7 @@ function SectionForm({ spec, section, draft, onDraft, onSaved }: { spec: Section
     event?.preventDefault()
     setSaving(true)
     try {
-      const updated = await api.platformSettings.save(spec.key, { enabled: draft.enabled, values: draft.values, secrets: draft.secrets })
+      const updated = await adapter.save(spec.key, { enabled: draft.enabled, values: draft.values, secrets: draft.secrets })
       onSaved(updated)
       setResetToken((value) => value + 1)
       toast.success(`${spec.title}: cambios guardados`)
@@ -275,7 +307,7 @@ function SectionForm({ spec, section, draft, onDraft, onSaved }: { spec: Section
   const test = async () => {
     setTesting(true)
     try {
-      const result = await api.platformSettings.test(spec.key, recipient.trim() || undefined)
+      const result = await adapter.test(spec.key, recipient.trim() || undefined)
       if (result.ok) toast.success(result.message)
       else toast.warning(result.message)
     } catch (error) {
@@ -287,7 +319,7 @@ function SectionForm({ spec, section, draft, onDraft, onSaved }: { spec: Section
 
   const registerWebhook = async () => {
     try {
-      const result = await api.platformSettings.registerTelegramWebhook()
+      const result = await adapter.registerTelegramWebhook!()
       toast.success(result.message)
     } catch (error) {
       toast.error(errorText(error, "No se pudo registrar el webhook"))
@@ -353,7 +385,7 @@ function SectionForm({ spec, section, draft, onDraft, onSaved }: { spec: Section
           <ul className="mt-4 divide-y divide-border">
             {endpoints.map((item) => <EndpointRow key={item.key} label={item.label} hint={item.hint} url={section.endpoints[item.key]} />)}
           </ul>
-          {spec.key === "telegram" ? <Button type="button" variant="outline" className="mt-4" disabled={dirty || !section.configured} onClick={() => void registerWebhook()}><Send />Registrar webhook en Telegram</Button> : null}
+          {spec.key === "telegram" && adapter.registerTelegramWebhook ? <Button type="button" variant="outline" className="mt-4" disabled={dirty || !section.configured} onClick={() => void registerWebhook()}><Send />Registrar webhook en Telegram</Button> : null}
         </Card>
       ) : null}
 

@@ -62,6 +62,7 @@ export class MailService {
             apiKey: resendApiKey,
             fromEmail,
             fromName,
+            replyTo: orgSettings.replyTo || undefined,
             to: toRecipients,
             subject: options.subject,
             html: options.html,
@@ -88,6 +89,7 @@ export class MailService {
             pass: smtpPass,
             fromEmail,
             fromName,
+            replyTo: orgSettings.replyTo || undefined,
             to: toRecipients,
             subject: options.subject,
             html: options.html,
@@ -103,7 +105,7 @@ export class MailService {
     }
 
     // Correo global de la plataforma (Administración > Configuración > Correo).
-    if (!this.settings.isReady('mail')) {
+    if (!this.settings.isReady(null, 'mail')) {
       if (process.env.NODE_ENV === 'production') {
         return { sent: false, reason: 'El correo de la plataforma no está configurado (Administración > Configuración > Correo).' };
       }
@@ -141,7 +143,7 @@ export class MailService {
 
   /** Prueba del correo global: falla si no está configurado en lugar de simular. */
   async sendPlatformTest(to: string): Promise<MailDeliveryResult> {
-    if (!this.settings.isReady('mail')) return { sent: false, reason: 'Completa y guarda la configuración de correo antes de probarla.' };
+    if (!this.settings.isReady(null, 'mail')) return { sent: false, reason: 'Completa y guarda la configuración de correo antes de probarla.' };
     const mail = this.settings.get('mail');
     const sender = mail.provider === 'RESEND' ? mail.fromEmail : (mail.fromEmail || mail.smtpUser);
     const template = this.templateService.renderNotification({

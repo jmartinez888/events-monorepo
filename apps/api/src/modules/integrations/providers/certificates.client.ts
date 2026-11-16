@@ -13,8 +13,8 @@ export interface CertificateIssueRequest {
 export interface CertificateIssueResponse { id: string; code: string; status: string; verifyUrl?: string }
 
 /**
- * Sistema de Certificados del IIAP (flujo 05). URL y API key (X-API-Key con
- * permiso de emisión) se configuran en Administración > Configuración.
+ * Sistema de Certificados (flujo 05). Cada institución configura URL y API key
+ * (X-API-Key con permiso de emisión) en Configuración > Integraciones.
  *
  * Contrato PROPUESTO: POST {url}/api/v1/certificates/issue con cabecera
  * Idempotency-Key. Sin URL y clave, Eventos emite y verifica localmente.
@@ -23,12 +23,12 @@ export interface CertificateIssueResponse { id: string; code: string; status: st
 export class CertificatesClient {
   constructor(private readonly settings: PlatformSettingsService) {}
 
-  get configured() {
-    return this.settings.isReady('certificates');
+  configured(organizationId: string | null | undefined) {
+    return this.settings.isReady(organizationId, 'certificates');
   }
 
-  issue(request: CertificateIssueRequest) {
-    const cfg = this.settings.get('certificates');
+  issue(organizationId: string | null | undefined, request: CertificateIssueRequest) {
+    const cfg = this.settings.forOrganization(organizationId, 'certificates');
     return requestJson<CertificateIssueResponse>(`${cfg.apiUrl.replace(/\/+$/, '')}/api/v1/certificates/issue`, {
       provider: 'Certificados',
       method: 'POST',

@@ -55,6 +55,11 @@ export class UpdateEmailSettingsDto {
   @IsString()
   smtpFromName?: string;
 
+  /** Dirección que recibe las respuestas; vacía para quitarla. */
+  @IsOptional()
+  @IsString()
+  replyTo?: string;
+
   @IsOptional()
   verifiedSenders?: Array<{ email: string; name?: string; label?: string }>;
 

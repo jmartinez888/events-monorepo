@@ -56,7 +56,7 @@ export class IntegrationsService {
     const registrantErrors = await this.prisma.sessionRegistration.groupBy({ by: ['sessionId', 'status'], where: { session: { activity: { edition: { mainEventId: eventId } } } }, _count: true });
     const failedJobs = await this.prisma.integrationJob.findMany({ where: { status: 'FAILED', OR: sessions.map((session) => ({ payload: { path: ['sessionId'], equals: session.id } })) }, orderBy: { updatedAt: 'desc' }, take: 20, select: { id: true, kind: true, payload: true, lastError: true, attempts: true, updatedAt: true } });
     return {
-      providers: { zoom: this.zoom.configured, zoomWebhook: this.zoom.webhookConfigured, facebook: this.facebook.configured, attendance: this.attendanceApi.configured, certificates: this.certificates.configured, telegram: this.telegram.configured, storage: this.storage.driver },
+      providers: { zoom: this.zoom.configured(event.organizationId), zoomWebhook: this.zoom.webhookConfigured(event.organizationId), facebook: this.facebook.configured(event.organizationId), attendance: this.attendanceApi.configured(event.organizationId), certificates: this.certificates.configured(event.organizationId), telegram: this.telegram.configured(event.organizationId), storage: this.storage.driver },
       settings: event,
       sessions: sessions.map((session) => ({ ...session, registrants: registrantErrors.filter((item) => item.sessionId === session.id).map((item) => ({ status: item.status, count: item._count })) })),
       failedJobs: sessions.length ? failedJobs : [],
@@ -122,8 +122,8 @@ export class IntegrationsService {
   }
 
   /** Para el webhook meeting.ended: importa tras unos minutos, cuando Zoom ya publicó el reporte. */
-  async onZoomMeetingEnded(meetingId: string) {
-    const integration = await this.prisma.sessionIntegration.findFirst({ where: { zoomMeetingId: meetingId }, include: { session: { include: { activity: { include: { edition: { include: { mainEvent: { select: { virtualAttendanceMode: true } } } } } } } } } });
+  async onZoomMeetingEnded(organizationId: string, meetingId: string) {
+    const integration = await this.prisma.sessionIntegration.findFirst({ where: { zoomMeetingId: meetingId, session: { activity: { edition: { mainEvent: { organizationId } } } } }, include: { session: { include: { activity: { include: { edition: { include: { mainEvent: { select: { virtualAttendanceMode: true } } } } } } } } } });
     if (!integration) return { matched: false };
     await this.prisma.sessionIntegration.update({ where: { id: integration.id }, data: { zoomEndedAt: new Date() } });
     if (integration.session.activity.edition.mainEvent.virtualAttendanceMode === 'AUTOMATIC') {
@@ -132,12 +132,12 @@ export class IntegrationsService {
     return { matched: true };
   }
 
-  async onZoomMeetingUpdated(meetingId: string) {
-    const integration = await this.prisma.sessionIntegration.findFirst({ where: { zoomMeetingId: meetingId } });
+  async onZoomMeetingUpdated(organizationId: string, meetingId: string) {
+    const integration = await this.prisma.sessionIntegration.findFirst({ where: { zoomMeetingId: meetingId, session: { activity: { edition: { mainEvent: { organizationId } } } } } });
     // Eventos es la fuente de verdad: un cambio hecho en Zoom se reconcilia con los datos de Eventos.
     if (integration) await this.jobs.enqueue(JOB.ZOOM_SYNC, { sessionId: integration.sessionId }, { dedupeKey: `zoom-sync:${integration.sessionId}` });
     return { matched: !!integration };
   }
 }
 
-const settingsSelect = { id: true, eventName: true, eventMode: true, virtualAttendanceMode: true, attendanceThreshold: true, capacity: true, waitlistEnabled: true, reminderOffsets: true, zoomEnabled: true, facebookLiveEnabled: true, attendanceMirrorEnabled: true } satisfies Prisma.MainEventSelect;
+const settingsSelect = { id: true, organizationId: true, eventName: true, eventMode: true, virtualAttendanceMode: true, attendanceThreshold: true, capacity: true, waitlistEnabled: true, reminderOffsets: true, zoomEnabled: true, facebookLiveEnabled: true, attendanceMirrorEnabled: true } satisfies Prisma.MainEventSelect;

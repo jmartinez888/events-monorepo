@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Headers, HttpCode, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { Prisma } from '@prisma/client';
@@ -61,45 +61,48 @@ export class IntegrationWebhooksController {
     private readonly attendanceApi: AttendanceClient,
   ) {}
 
-  @Public() @Post('webhooks/zoom') @HttpCode(200)
-  async zoomWebhook(@Req() request: RawRequest, @Headers('x-zm-request-timestamp') timestamp?: string, @Headers('x-zm-signature') signature?: string) {
+  /** Cada institución registra en Zoom su propia URL: /webhooks/zoom/<id de la institución>. */
+  @Public() @Post('webhooks/zoom/:organizationId') @HttpCode(200)
+  async zoomWebhook(@Param('organizationId', ParseUUIDPipe) organizationId: string, @Req() request: RawRequest, @Headers('x-zm-request-timestamp') timestamp?: string, @Headers('x-zm-signature') signature?: string) {
     const raw = request.rawBody?.toString('utf8') ?? JSON.stringify(request.body);
-    if (!this.zoom.verifyWebhook(raw, timestamp, signature)) throw new ForbiddenException('Firma inválida');
+    if (!this.zoom.verifyWebhook(organizationId, raw, timestamp, signature)) throw new ForbiddenException('Firma inválida');
     const body = request.body ?? {};
-    if (body.event === 'endpoint.url_validation') return this.zoom.urlValidation(String(body.payload?.plainToken ?? ''));
+    if (body.event === 'endpoint.url_validation') return this.zoom.urlValidation(organizationId, String(body.payload?.plainToken ?? ''));
     const object = body.payload?.object ?? {};
-    const externalId = `${body.event}:${object.uuid ?? object.id}:${body.event_ts ?? timestamp}`;
+    const externalId = `${organizationId}:${body.event}:${object.uuid ?? object.id}:${body.event_ts ?? timestamp}`;
     if (!(await this.receipt('zoom', externalId, String(body.event), body))) return { duplicate: true };
     const meetingId = String(object.id ?? '');
-    const result = body.event === 'meeting.ended' ? await this.integrations.onZoomMeetingEnded(meetingId)
-      : body.event === 'meeting.updated' ? await this.integrations.onZoomMeetingUpdated(meetingId)
+    const result = body.event === 'meeting.ended' ? await this.integrations.onZoomMeetingEnded(organizationId, meetingId)
+      : body.event === 'meeting.updated' ? await this.integrations.onZoomMeetingUpdated(organizationId, meetingId)
       : { ignored: true };
     await this.prisma.webhookReceipt.update({ where: { provider_externalId: { provider: 'zoom', externalId } }, data: { processedAt: new Date() } });
     return result;
   }
 
   /** Marca en tiempo real desde Asistencia: { event_id, attendee: { id, user_name, user_email, document_number } }. */
-  @Public() @Post('webhooks/attendance') @HttpCode(200)
-  async attendanceWebhook(@Req() request: RawRequest, @Headers('x-attendance-signature') signature?: string) {
+  @Public() @Post('webhooks/attendance/:organizationId') @HttpCode(200)
+  async attendanceWebhook(@Param('organizationId', ParseUUIDPipe) organizationId: string, @Req() request: RawRequest, @Headers('x-attendance-signature') signature?: string) {
     const raw = request.rawBody?.toString('utf8') ?? JSON.stringify(request.body);
-    if (!this.attendanceApi.verifyWebhook(raw, signature)) throw new ForbiddenException('Firma inválida');
+    if (!this.attendanceApi.verifyWebhook(organizationId, raw, signature)) throw new ForbiddenException('Firma inválida');
     const eventId = String(request.body?.event_id ?? '');
     const attendee = request.body?.attendee as AttendanceAttendee | undefined;
     if (!eventId || !attendee?.id) return { ignored: true };
-    if (!(await this.receipt('attendance', `${eventId}:${attendee.id}`, 'attendance.recorded', request.body))) return { duplicate: true };
-    const integration = await this.prisma.sessionIntegration.findFirst({ where: { attendanceEventId: eventId } });
+    const externalId = `${organizationId}:${eventId}:${attendee.id}`;
+    if (!(await this.receipt('attendance', externalId, 'attendance.recorded', request.body))) return { duplicate: true };
+    // Solo se aceptan marcas de espejos que pertenecen a la institución firmante.
+    const integration = await this.prisma.sessionIntegration.findFirst({ where: { attendanceEventId: eventId, session: { activity: { edition: { mainEvent: { organizationId } } } } } });
     if (!integration) return { matched: false };
     const session = await this.sync.load(integration.sessionId);
     const participantId = await this.sync.recordAttendee(session, attendee);
-    await this.prisma.webhookReceipt.update({ where: { provider_externalId: { provider: 'attendance', externalId: `${eventId}:${attendee.id}` } }, data: { processedAt: new Date() } });
+    await this.prisma.webhookReceipt.update({ where: { provider_externalId: { provider: 'attendance', externalId } }, data: { processedAt: new Date() } });
     return { matched: true, registrationId: participantId };
   }
 
   /** Asistencia pide registrar a una persona nueva; nunca escribe directo al Directorio (flujo 03 §4). */
-  @Public() @Post('integrations/attendance/person-registrations') @HttpCode(200)
-  async onsiteRegistration(@Body() dto: OnsiteRegistrationDto, @Headers('x-service-key') key?: string) {
-    if (!this.attendanceApi.verifyServiceKey(key)) throw new ForbiddenException('Clave de servicio inválida');
-    return this.sync.registerOnsitePerson(dto);
+  @Public() @Post('integrations/attendance/:organizationId/person-registrations') @HttpCode(200)
+  async onsiteRegistration(@Param('organizationId', ParseUUIDPipe) organizationId: string, @Body() dto: OnsiteRegistrationDto, @Headers('x-service-key') key?: string) {
+    if (!this.attendanceApi.verifyServiceKey(organizationId, key)) throw new ForbiddenException('Clave de servicio inválida');
+    return this.sync.registerOnsitePerson(organizationId, dto);
   }
 
   /** Devuelve false si el proveedor ya envió este mensaje. */

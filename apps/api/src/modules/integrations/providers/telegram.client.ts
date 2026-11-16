@@ -4,28 +4,28 @@ import { requestJson } from '../http.js';
 import { PlatformSettingsService } from '../../platform-settings/platform-settings.service.js';
 
 /**
- * Bot de Telegram (flujo 07). Se configura en Administración > Configuración:
- * token del bot, usuario (para el deep-link t.me/<bot>?start=<token>) y el
+ * Bot de Telegram de cada institución (flujo 07), configurado en Configuración >
+ * Integraciones: token, usuario (para el deep-link t.me/<bot>?start=<token>) y
  * secreto de la cabecera X-Telegram-Bot-Api-Secret-Token.
  */
 @Injectable()
 export class TelegramClient {
   constructor(private readonly settings: PlatformSettingsService) {}
 
-  private get cfg() {
-    return this.settings.get('telegram');
+  private cfg(organizationId: string | null | undefined) {
+    return this.settings.forOrganization(organizationId, 'telegram');
   }
 
-  get configured() {
-    return this.settings.isReady('telegram');
+  configured(organizationId: string | null | undefined) {
+    return this.settings.isReady(organizationId, 'telegram');
   }
 
-  deepLink(linkToken: string) {
-    return this.configured ? `https://t.me/${this.cfg.botUsername}?start=${linkToken}` : null;
+  deepLink(organizationId: string | null | undefined, linkToken: string) {
+    return this.configured(organizationId) ? `https://t.me/${this.cfg(organizationId).botUsername}?start=${linkToken}` : null;
   }
 
-  async sendMessage(chatId: string, html: string) {
-    await requestJson(`https://api.telegram.org/bot${this.cfg.botToken}/sendMessage`, {
+  async sendMessage(organizationId: string | null | undefined, chatId: string, html: string) {
+    await requestJson(`https://api.telegram.org/bot${this.cfg(organizationId).botToken}/sendMessage`, {
       provider: 'Telegram',
       method: 'POST',
       body: { chat_id: chatId, text: html.slice(0, 4000), parse_mode: 'HTML', disable_web_page_preview: true },
@@ -33,21 +33,22 @@ export class TelegramClient {
   }
 
   /** Prueba de conexión: identidad del bot. */
-  getMe() {
-    return requestJson<{ result: { username: string; first_name: string } }>(`https://api.telegram.org/bot${this.cfg.botToken}/getMe`, { provider: 'Telegram', method: 'GET' });
+  getMe(organizationId: string | null | undefined) {
+    return requestJson<{ result: { username: string; first_name: string } }>(`https://api.telegram.org/bot${this.cfg(organizationId).botToken}/getMe`, { provider: 'Telegram', method: 'GET' });
   }
 
-  /** Registra el webhook de la API en Telegram con el secreto configurado. */
-  setWebhook(url: string) {
-    return requestJson(`https://api.telegram.org/bot${this.cfg.botToken}/setWebhook`, {
+  /** Registra en Telegram el webhook de esta institución con su secreto. */
+  setWebhook(organizationId: string | null | undefined, url: string) {
+    const cfg = this.cfg(organizationId);
+    return requestJson(`https://api.telegram.org/bot${cfg.botToken}/setWebhook`, {
       provider: 'Telegram',
       method: 'POST',
-      body: { url, secret_token: this.cfg.webhookSecret || undefined, allowed_updates: ['message'] },
+      body: { url, secret_token: cfg.webhookSecret || undefined, allowed_updates: ['message'] },
     });
   }
 
-  verifyWebhook(secretHeader: string | undefined) {
-    const expected = this.cfg.webhookSecret;
+  verifyWebhook(organizationId: string | null | undefined, secretHeader: string | undefined) {
+    const expected = this.cfg(organizationId).webhookSecret;
     return !!expected && !!secretHeader && safeEqualText(secretHeader, expected);
   }
 }

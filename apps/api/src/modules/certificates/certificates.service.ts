@@ -191,11 +191,12 @@ export class CertificatesService implements OnModuleInit {
   private async createVersion(tx: Prisma.TransactionClient, participantId: string, roleId: string, hours: number, templateId: string | undefined, actor: Actor) {
     const last = await tx.participantCertificate.findFirst({ where: { participantId, roleId }, orderBy: { version: 'desc' }, select: { version: true } });
     const version = (last?.version ?? 0) + 1;
+    const owner = await tx.eventParticipant.findUnique({ where: { id: participantId }, select: { edition: { select: { mainEvent: { select: { organizationId: true } } } } } });
     return tx.participantCertificate.create({
       data: {
         participantId, roleId, templateId, hours, version, code: localCode(), issuedBy: actor.accountId,
         idempotencyKey: `${participantId}:${roleId}:v${version}`,
-        status: this.external.configured ? 'PENDING' : 'ISSUED',
+        status: this.external.configured(owner?.edition.mainEvent.organizationId) ? 'PENDING' : 'ISSUED',
       },
     });
   }
@@ -218,7 +219,7 @@ export class CertificatesService implements OnModuleInit {
     if (!certificate || certificate.status !== 'PENDING' || !certificate.role || !certificate.idempotencyKey) return;
     const { profile, edition } = certificate.participant;
     try {
-      const response = await this.external.issue({
+      const response = await this.external.issue(edition.mainEvent.organizationId, {
         idempotencyKey: certificate.idempotencyKey,
         person: { directoryPersonId: profile.id, firstName: profile.firstName ?? '', lastName: profile.lastName ?? '', documentType: profile.identityDocumentType, documentNumber: profile.identityDocumentNumber, email: profile.primaryEmail },
         event: { id: edition.mainEventId, name: edition.mainEvent.eventName, editionId: edition.id, editionName: edition.name, startDate: (edition.startDate ?? edition.mainEvent.startDate).toISOString(), endDate: (edition.endDate ?? edition.mainEvent.endDate)?.toISOString() ?? null },

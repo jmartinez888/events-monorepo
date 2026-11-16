@@ -5,6 +5,7 @@ import { LoginPage } from "@/pages/LoginPage"
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage"
 import { OrganizationsPage } from "@/pages/OrganizationsPage"
 import { OrganizationSettingsPage } from "@/pages/OrganizationSettingsPage"
+import { OrganizationIntegrationsPage } from "@/pages/OrganizationIntegrationsPage"
 import { CreateOrganizationPage } from "@/pages/CreateOrganizationPage"
 import {
   ProfileLayout,
@@ -191,6 +192,7 @@ export function AppRouter() {
 
           {/* Settings Page */}
           <Route path="settings/business" element={<OrganizationSettingsPage />} />
+          <Route path="settings/integrations" element={<OrganizationIntegrationsPage />} />
 
           {/* Branches Pages */}
           <Route path="settings/branches" element={<BranchesPage />} />

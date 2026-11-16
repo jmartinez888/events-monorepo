@@ -91,15 +91,15 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     if (!event.zoomEnabled || !this.isVirtual(session)) return this.setIntegration(sessionId, { zoomStatus: 'DISABLED', zoomError: null });
     const window = this.window(session);
     if (!window) return this.setIntegration(sessionId, { zoomStatus: 'ERROR', zoomError: 'La sesión necesita hora de inicio y fin' });
-    if (!this.zoom.configured) return this.setIntegration(sessionId, { zoomStatus: 'ERROR', zoomError: 'Zoom no está configurado (Administración > Configuración > Zoom)' });
+    if (!this.zoom.configured(event.organizationId)) return this.setIntegration(sessionId, { zoomStatus: 'ERROR', zoomError: 'Zoom no está configurado (Configuración › Integraciones de la institución)' });
     const topic = `${event.eventName} · ${session.title}`;
     const durationMinutes = Math.max(1, Math.round((window.end.getTime() - window.start.getTime()) / 60_000));
     try {
       if (session.integration?.zoomMeetingId) {
-        await this.zoom.updateMeeting(session.integration.zoomMeetingId, { topic, startTime: window.start, durationMinutes, agenda: session.description ?? undefined });
+        await this.zoom.updateMeeting(event.organizationId, session.integration.zoomMeetingId, { topic, startTime: window.start, durationMinutes, agenda: session.description ?? undefined });
         await this.setIntegration(sessionId, { zoomStatus: 'SYNCED', zoomError: null });
       } else {
-        const meeting = await this.zoom.createMeeting({ topic, startTime: window.start, durationMinutes, agenda: session.description ?? undefined, registration: true });
+        const meeting = await this.zoom.createMeeting(event.organizationId, { topic, startTime: window.start, durationMinutes, agenda: session.description ?? undefined, registration: true });
         await this.setIntegration(sessionId, { zoomMeetingId: String(meeting.id), zoomJoinUrl: meeting.join_url, zoomStartUrlEnc: meeting.start_url ? encryptSecret(meeting.start_url) : null, zoomRegistrationUrl: meeting.registration_url ?? null, zoomStatus: 'SYNCED', zoomError: null });
         // Inscritos que ya existían reciben ahora su enlace único.
         const participants = await this.prisma.eventParticipant.findMany({ where: { editionId: session.activity.editionId, status: 'CONFIRMED' }, select: { id: true } });
@@ -119,17 +119,17 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     const window = this.window(session);
     const meetingId = session.integration?.zoomMeetingId;
     if (!window || !meetingId) return this.setIntegration(sessionId, { facebookStatus: 'PENDING', facebookError: 'Se configura después de crear la reunión de Zoom' });
-    if (!this.facebook.configured) return this.setIntegration(sessionId, { facebookStatus: 'ERROR', facebookError: 'Facebook Live no está configurado (Administración > Configuración > Facebook Live)' });
+    if (!this.facebook.configured(event.organizationId)) return this.setIntegration(sessionId, { facebookStatus: 'ERROR', facebookError: 'Facebook Live no está configurado (Configuración › Integraciones de la institución)' });
     const input = { title: `${event.eventName} · ${session.title}`, description: session.description ?? event.description ?? undefined, plannedStart: window.start };
     try {
       if (session.integration?.facebookLiveId) {
-        await this.facebook.updateLiveVideo(session.integration.facebookLiveId, input);
+        await this.facebook.updateLiveVideo(event.organizationId, session.integration.facebookLiveId, input);
         await this.setIntegration(sessionId, { facebookStatus: 'SYNCED', facebookError: null });
         return;
       }
-      const live = await this.facebook.createLiveVideo(input);
+      const live = await this.facebook.createLiveVideo(event.organizationId, input);
       await this.setIntegration(sessionId, { facebookLiveId: live.liveId, facebookLiveUrl: live.permalink, rtmpStreamUrl: live.streamUrl, rtmpStreamKeyEnc: encryptSecret(live.streamKey), facebookStatus: 'PENDING', facebookError: 'Live creado; configurando la transmisión en Zoom' });
-      await this.zoom.setLivestream(meetingId, { streamUrl: live.streamUrl, streamKey: live.streamKey, pageUrl: live.permalink });
+      await this.zoom.setLivestream(event.organizationId, meetingId, { streamUrl: live.streamUrl, streamKey: live.streamKey, pageUrl: live.permalink });
       await this.setIntegration(sessionId, { facebookStatus: 'SYNCED', facebookError: null });
     } catch (error: any) {
       await this.setIntegration(sessionId, { facebookStatus: 'ERROR', facebookError: String(error?.message ?? error).slice(0, 1000) });
@@ -151,7 +151,7 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
       throw new PermanentError('La persona no tiene correo para registrarla en Zoom');
     }
     try {
-      const registrant = await this.zoom.addRegistrant(integration.zoomMeetingId, { email, firstName: participant.profile.firstName ?? 'Participante', lastName: participant.profile.lastName ?? '' });
+      const registrant = await this.zoom.addRegistrant((await this.load(sessionId)).activity.edition.mainEvent.organizationId, integration.zoomMeetingId, { email, firstName: participant.profile.firstName ?? 'Participante', lastName: participant.profile.lastName ?? '' });
       await this.prisma.sessionRegistration.upsert({ where: { participantId_sessionId: base }, create: { ...base, registrantId: registrant.registrant_id, joinUrl: registrant.join_url, status: 'SYNCED', attempts: 1 }, update: { registrantId: registrant.registrant_id, joinUrl: registrant.join_url, status: 'SYNCED', lastError: null, attempts: { increment: 1 } } });
     } catch (error: any) {
       // La inscripción sigue confirmada; el enlace queda pendiente y la cola reintenta (flujo 02 §5).
@@ -173,7 +173,7 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     const window = this.window(session);
     if (!window) throw new PermanentError('La sesión necesita hora de inicio y fin para calcular la permanencia');
     const duration = Math.max(1, (window.end.getTime() - window.start.getTime()) / 60_000);
-    const rows = await this.zoom.pastParticipants(meetingId);
+    const rows = await this.zoom.pastParticipants(event.organizationId, meetingId);
     return this.applyZoomReport(session, rows, duration);
   }
 
@@ -234,13 +234,13 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     const session = await this.load(sessionId);
     const event = session.activity.edition.mainEvent;
     if (!event.attendanceMirrorEnabled || !this.isPhysical(session)) return this.setIntegration(sessionId, { attendanceStatus: 'DISABLED', attendanceError: null });
-    if (!this.attendanceApi.configured) return this.setIntegration(sessionId, { attendanceStatus: 'ERROR', attendanceError: 'Asistencia no está configurada (Administración > Configuración > Sistema de Asistencia)' });
+    if (!this.attendanceApi.configured(event.organizationId)) return this.setIntegration(sessionId, { attendanceStatus: 'ERROR', attendanceError: 'Asistencia no está configurada (Configuración › Integraciones de la institución)' });
     const window = this.window(session) ?? { start: session.activity.edition.startDate ?? event.startDate, end: session.activity.edition.endDate ?? event.endDate ?? event.startDate };
     const mirror = { sessionId, title: `${event.eventName} · ${session.title}`, description: session.description ?? event.description ?? undefined, location: session.activity.edition.location ?? event.venueAddress, startDate: window.start, endDate: window.end };
     try {
-      if (session.integration?.attendanceEventId) await this.attendanceApi.updateEvent(session.integration.attendanceEventId, mirror);
+      if (session.integration?.attendanceEventId) await this.attendanceApi.updateEvent(event.organizationId, session.integration.attendanceEventId, mirror);
       else {
-        const created = await this.attendanceApi.createEvent(mirror);
+        const created = await this.attendanceApi.createEvent(event.organizationId, mirror);
         await this.setIntegration(sessionId, { attendanceEventId: String(created.id) });
       }
       await this.setIntegration(sessionId, { attendanceStatus: 'SYNCED', attendanceError: null });
@@ -256,7 +256,7 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     const session = await this.load(sessionId);
     const externalId = session.integration?.attendanceEventId;
     if (!externalId) throw new PermanentError('La sesión no tiene evento espejo en Asistencia');
-    const mirror = await this.attendanceApi.getEvent(externalId);
+    const mirror = await this.attendanceApi.getEvent(session.activity.edition.mainEvent.organizationId, externalId);
     let recorded = 0;
     for (const attendee of mirror.attendees ?? []) {
       await this.recordAttendee(session, attendee);
@@ -287,13 +287,15 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Persona nueva capturada en sede por Asistencia: Eventos escribe en el Directorio y crea la inscripción (flujo 03 §4). */
-  async registerOnsitePerson(input: { attendanceEventId?: string; sessionId?: string; person: { firstName: string; lastName: string; email?: string; documentType?: string; documentNumber?: string; phone?: string } }) {
+  async registerOnsitePerson(organizationId: string, input: { attendanceEventId?: string; sessionId?: string; person: { firstName: string; lastName: string; email?: string; documentType?: string; documentNumber?: string; phone?: string } }) {
     const integration = input.sessionId
       ? await this.prisma.sessionIntegration.findUnique({ where: { sessionId: input.sessionId } })
       : input.attendanceEventId ? await this.prisma.sessionIntegration.findFirst({ where: { attendanceEventId: input.attendanceEventId } }) : null;
     const sessionId = integration?.sessionId ?? input.sessionId;
     if (!sessionId) throw new NotFoundException('Evento espejo no encontrado');
     const session = await this.load(sessionId);
+    // La clave de servicio de una institución no permite inscribir en eventos de otra.
+    if (session.activity.edition.mainEvent.organizationId !== organizationId) throw new NotFoundException('Evento espejo no encontrado');
     const result = await this.prisma.$transaction((tx) => this.registrations.register(tx, {
       eventId: session.activity.edition.mainEventId, editionId: session.activity.editionId, origin: 'ONSITE', reviewConflicts: true,
       person: { firstName: input.person.firstName, lastName: input.person.lastName, email: input.person.email, identityDocumentType: input.person.documentType ?? (input.person.documentNumber ? 'DNI' : null), identityDocumentNumber: input.person.documentNumber ?? null, phone: input.person.phone },
