@@ -91,7 +91,7 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     if (!event.zoomEnabled || !this.isVirtual(session)) return this.setIntegration(sessionId, { zoomStatus: 'DISABLED', zoomError: null });
     const window = this.window(session);
     if (!window) return this.setIntegration(sessionId, { zoomStatus: 'ERROR', zoomError: 'La sesión necesita hora de inicio y fin' });
-    if (!this.zoom.configured) return this.setIntegration(sessionId, { zoomStatus: 'ERROR', zoomError: 'Zoom no está configurado en el servidor (ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET)' });
+    if (!this.zoom.configured) return this.setIntegration(sessionId, { zoomStatus: 'ERROR', zoomError: 'Zoom no está configurado (Administración > Configuración > Zoom)' });
     const topic = `${event.eventName} · ${session.title}`;
     const durationMinutes = Math.max(1, Math.round((window.end.getTime() - window.start.getTime()) / 60_000));
     try {
@@ -119,7 +119,7 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     const window = this.window(session);
     const meetingId = session.integration?.zoomMeetingId;
     if (!window || !meetingId) return this.setIntegration(sessionId, { facebookStatus: 'PENDING', facebookError: 'Se configura después de crear la reunión de Zoom' });
-    if (!this.facebook.configured) return this.setIntegration(sessionId, { facebookStatus: 'ERROR', facebookError: 'Facebook no está configurado en el servidor (FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN)' });
+    if (!this.facebook.configured) return this.setIntegration(sessionId, { facebookStatus: 'ERROR', facebookError: 'Facebook Live no está configurado (Administración > Configuración > Facebook Live)' });
     const input = { title: `${event.eventName} · ${session.title}`, description: session.description ?? event.description ?? undefined, plannedStart: window.start };
     try {
       if (session.integration?.facebookLiveId) {
@@ -234,7 +234,7 @@ export class SessionSyncService implements OnModuleInit, OnModuleDestroy {
     const session = await this.load(sessionId);
     const event = session.activity.edition.mainEvent;
     if (!event.attendanceMirrorEnabled || !this.isPhysical(session)) return this.setIntegration(sessionId, { attendanceStatus: 'DISABLED', attendanceError: null });
-    if (!this.attendanceApi.configured) return this.setIntegration(sessionId, { attendanceStatus: 'ERROR', attendanceError: 'Asistencia no está configurada en el servidor (ATTENDANCE_API_URL, ATTENDANCE_API_TOKEN)' });
+    if (!this.attendanceApi.configured) return this.setIntegration(sessionId, { attendanceStatus: 'ERROR', attendanceError: 'Asistencia no está configurada (Administración > Configuración > Sistema de Asistencia)' });
     const window = this.window(session) ?? { start: session.activity.edition.startDate ?? event.startDate, end: session.activity.edition.endDate ?? event.endDate ?? event.startDate };
     const mirror = { sessionId, title: `${event.eventName} · ${session.title}`, description: session.description ?? event.description ?? undefined, location: session.activity.edition.location ?? event.venueAddress, startDate: window.start, endDate: window.end };
     try {

@@ -43,3 +43,6 @@ yarn-error.log*
 .agents
 .claude
 skills-lock.json
+
+# Graphify
+graphify-out/

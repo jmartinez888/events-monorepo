@@ -55,11 +55,12 @@ export function buildServices(overrides = {}) {
   const telegram = overrides.telegram ?? { configured: false, deepLink: () => null, sendMessage: async () => undefined, verifyWebhook: () => false };
   const zoom = overrides.zoom ?? { configured: false };
   const external = overrides.certificatesClient ?? { configured: false };
+  const platform = overrides.platform ?? { get: () => ({ organizationFallback: false }), isReady: () => false };
   const directory = new DirectoryService();
   const access = new EventAccessService(prisma);
   const attendance = new AttendanceService(prisma, access);
   const jobs = new IntegrationJobsService(prisma);
-  const notifications = new NotificationsService(prisma, mail, telegram);
+  const notifications = new NotificationsService(prisma, mail, telegram, platform);
   const storageDir = mkdtempSync(path.join(tmpdir(), 'events-files-'));
   const storage = new LocalDiskStorage(storageDir);
   const signer = new FileUrlSigner();

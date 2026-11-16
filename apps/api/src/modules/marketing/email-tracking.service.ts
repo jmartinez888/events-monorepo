@@ -2,16 +2,17 @@ import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/co
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.js';
 import { decryptCredential } from '../../common/utils/encryption.util.js';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service.js';
+import { config } from '../../common/config.js';
 
 type ProviderEvent = { type?: string; data?: Record<string, any>; [key: string]: any };
 
 @Injectable()
 export class EmailTrackingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly platform: PlatformSettingsService) {}
 
   private get baseUrl() {
-    const fallback = `http://localhost:${process.env.PORT || 3000}/api`;
-    return String(process.env.EMAIL_TRACKING_BASE_URL || process.env.PUBLIC_API_URL || fallback).replace(/\/+$/, '');
+    return String(this.platform.get('mail').trackingBaseUrl || config.apiPublicUrl()).replace(/\/+$/, '');
   }
 
   unsubscribeUrl(token: string) { return `${this.baseUrl}/email-tracking/unsubscribe/${token}`; }
@@ -61,7 +62,7 @@ export class EmailTrackingService {
   async verifyResendWebhook(rawBody: Buffer | undefined, headers: { id?: string; timestamp?: string; signature?: string }) {
     if (!rawBody || !headers.id || !headers.timestamp || !headers.signature) throw new UnauthorizedException('Firma de webhook incompleta');
     const settings = await this.prisma.organizationEmailSettings.findMany({ where: { defaultProvider: 'RESEND', isActive: true, resendWebhookSecretEncrypted: { not: null } }, select: { resendWebhookSecretEncrypted: true } });
-    const secrets = [...settings.map((item) => decryptCredential(item.resendWebhookSecretEncrypted || '')).filter(Boolean), process.env.RESEND_WEBHOOK_SECRET || ''];
+    const secrets = [...settings.map((item) => decryptCredential(item.resendWebhookSecretEncrypted || '')).filter(Boolean), this.platform.get('mail').resendWebhookSecret];
     if (!secrets.length || !secrets.some(Boolean)) throw new UnauthorizedException('No hay un secreto webhook de Resend configurado');
     const signed = `${headers.id}.${headers.timestamp}.${rawBody.toString('utf8')}`;
     const signatures = headers.signature.split(' ').map((part) => part.split(',')).filter(([version, value]) => version === 'v1' && Boolean(value)).map(([, value]) => value);

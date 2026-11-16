@@ -314,6 +314,14 @@ export const api = {
     confirm: (participantId: string) => apiFetch<any>(`/participants/${participantId}/confirm`, { method: "POST" }),
     promoteWaitlist: (eventId: string) => apiFetch<{ promoted: number }>(`/events/${eventId}/registrations/promote-waitlist`, { method: "POST" }),
   },
+  platformSettings: {
+    list: () => apiFetch<PlatformSection[]>("/admin/settings"),
+    save: (section: PlatformSectionKey, data: { enabled?: boolean; values?: Record<string, unknown>; secrets?: Record<string, string> }) =>
+      apiFetch<PlatformSection>(`/admin/settings/${section}`, { method: "PATCH", body: JSON.stringify(data) }),
+    test: (section: PlatformSectionKey, recipient?: string) =>
+      apiFetch<{ ok: boolean; message: string }>(`/admin/settings/${section}/test`, { method: "POST", body: JSON.stringify(recipient ? { recipient } : {}) }),
+    registerTelegramWebhook: () => apiFetch<{ ok: boolean; message: string }>("/admin/settings/telegram/register-webhook", { method: "POST" }),
+  },
   integrations: {
     overview: (eventId: string) => apiFetch<IntegrationsOverview>(`/events/${eventId}/integrations`),
     updateSettings: (eventId: string, data: Partial<EventSettings>) => apiFetch<EventSettings>(`/events/${eventId}/settings`, { method: "PATCH", body: JSON.stringify(data) }),
@@ -376,4 +384,17 @@ export interface IntegrationsOverview {
     registrants: Array<{ status: SyncState; count: number }>
   }>
   failedJobs: Array<{ id: string; kind: string; lastError: string | null; attempts: number; updatedAt: string }>
+}
+
+export type PlatformSectionKey = "mail" | "zoom" | "facebook" | "attendance" | "certificates" | "telegram"
+/** Configuración global. Los secretos solo informan si existen y su máscara; nunca su valor. */
+export interface PlatformSection {
+  key: PlatformSectionKey
+  enabled: boolean
+  configured: boolean
+  stored: boolean
+  updatedAt: string | null
+  values: Record<string, string | number | boolean>
+  secrets: Record<string, { set: boolean; masked: string }>
+  endpoints: Record<string, string>
 }

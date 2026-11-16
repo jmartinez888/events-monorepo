@@ -13,6 +13,8 @@ import { TemplateService } from './template.service.js';
 import { PrismaService } from '../../database/prisma.service.js';
 import { decryptCredential } from '../../common/utils/encryption.util.js';
 import nodemailer from 'nodemailer';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service.js';
+import { config } from '../../common/config.js';
 
 @Injectable()
 export class MailService {
@@ -21,11 +23,12 @@ export class MailService {
   constructor(
     private readonly templateService: TemplateService,
     private readonly prisma: PrismaService,
+    private readonly settings: PlatformSettingsService,
   ) { }
 
   /**
    * Universal send method. If organizationId is specified, uses the organization's
-   * configured credentials (Resend or Gmail/SMTP), otherwise falls back to system .env.
+   * configured credentials (Resend or Gmail/SMTP); otherwise uses the platform mail settings.
    */
   async send(options: SendMailOptions): Promise<MailDeliveryResult> {
     const toRecipients = Array.isArray(options.to) ? options.to : [options.to];
@@ -99,46 +102,58 @@ export class MailService {
       }
     }
 
-    // Correo global del sistema por SMTP (p. ej. Google Workspace del IIAP). Tiene prioridad sobre Resend.
-    if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-      const port = Number(process.env.SMTP_PORT || 587);
-      return this.sendWithSmtp({
-        host: process.env.SMTP_HOST,
-        port,
-        secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : port === 465,
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-        fromEmail: options.fromEmail || process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER,
-        fromName: options.fromName || process.env.SMTP_FROM_NAME || process.env.APP_NAME || 'Events Platform',
-        to: toRecipients,
-        subject: options.subject,
-        html: options.html,
-        text: options.text,
-      });
-    }
-
-    // Default System Fallback using .env
-    const apiKey = process.env.RESEND_API_KEY;
-    const fromEmail = options.fromEmail || process.env.RESEND_FROM_EMAIL;
-    const fromName = options.fromName || process.env.RESEND_FROM_NAME || process.env.APP_NAME || 'Events Platform';
-
-    if (!apiKey || !fromEmail || apiKey.includes('xxxxxxxx') || apiKey.trim() === '') {
-      this.logger.warn(
-        `[DEV MODE - Email Simulado] Para: ${toRecipients.join(', ')} | Asunto: "${options.subject}"`
-      );
+    // Correo global de la plataforma (Administración > Configuración > Correo).
+    if (!this.settings.isReady('mail')) {
+      if (process.env.NODE_ENV === 'production') {
+        return { sent: false, reason: 'El correo de la plataforma no está configurado (Administración > Configuración > Correo).' };
+      }
+      this.logger.warn(`[DEV MODE - Email Simulado] Para: ${toRecipients.join(', ')} | Asunto: "${options.subject}"`);
       this.logger.debug(`[DEV MODE - Contenido]:\n${options.text || options.html}`);
       return { sent: true, reason: 'Modo desarrollo: simulado exitosamente en consola' };
     }
+    return this.sendGlobal({ ...options, to: toRecipients });
+  }
 
-    return this.sendWithResend({
-      apiKey,
-      fromEmail,
+  /** Envía con la configuración global guardada, usando el alias y el «Responder a» definidos por el administrador. */
+  private sendGlobal(options: SendMailOptions & { to: string[] }): Promise<MailDeliveryResult> {
+    const mail = this.settings.get('mail');
+    const fromName = options.fromName || mail.fromName || config.appName();
+    const replyTo = mail.replyTo || undefined;
+    if (mail.provider === 'RESEND') {
+      return this.sendWithResend({ apiKey: mail.resendApiKey, fromEmail: options.fromEmail || mail.fromEmail, fromName, replyTo, to: options.to, subject: options.subject, html: options.html, text: options.text });
+    }
+    return this.sendWithSmtp({
+      host: mail.smtpHost,
+      port: mail.smtpPort,
+      secure: mail.smtpSecure,
+      user: mail.smtpUser,
+      pass: mail.smtpPass,
+      // El alias debe estar autorizado en la cuenta SMTP (en Gmail: «Enviar como»).
+      fromEmail: options.fromEmail || mail.fromEmail || mail.smtpUser,
       fromName,
-      to: toRecipients,
+      replyTo,
+      to: options.to,
       subject: options.subject,
       html: options.html,
       text: options.text,
     });
+  }
+
+  /** Prueba del correo global: falla si no está configurado en lugar de simular. */
+  async sendPlatformTest(to: string): Promise<MailDeliveryResult> {
+    if (!this.settings.isReady('mail')) return { sent: false, reason: 'Completa y guarda la configuración de correo antes de probarla.' };
+    const mail = this.settings.get('mail');
+    const sender = mail.provider === 'RESEND' ? mail.fromEmail : (mail.fromEmail || mail.smtpUser);
+    const template = this.templateService.renderNotification({
+      title: 'Correo de la plataforma configurado',
+      message: `Este mensaje confirma que ${config.appName()} puede enviar correos.`,
+      details: [
+        { label: 'Proveedor', value: mail.provider === 'RESEND' ? 'Resend' : `SMTP (${mail.smtpHost})` },
+        { label: 'Remitente', value: `${mail.fromName || config.appName()} <${sender}>` },
+        ...(mail.replyTo ? [{ label: 'Responder a', value: mail.replyTo }] : []),
+      ],
+    });
+    return this.sendGlobal({ to: [to], subject: template.subject, html: template.html, text: template.text });
   }
 
   /**
@@ -149,9 +164,9 @@ export class MailService {
     const provider = options.provider || 'RESEND';
 
     if (provider === 'RESEND') {
-      const apiKey = options.resendApiKey || process.env.RESEND_API_KEY;
-      const fromEmail = options.fromEmail || options.resendFromEmail || process.env.RESEND_FROM_EMAIL || 'noreply@asipe.site';
-      const fromName = options.fromName || options.resendFromName || process.env.RESEND_FROM_NAME || 'Events Platform';
+      const apiKey = options.resendApiKey || this.settings.get('mail').resendApiKey;
+      const fromEmail = options.fromEmail || options.resendFromEmail || this.settings.get('mail').fromEmail;
+      const fromName = options.fromName || options.resendFromName || this.settings.get('mail').fromName || config.appName();
 
       if (!apiKey || apiKey.trim() === '') {
         return { sent: false, reason: 'No se ha configurado la API Key de Resend.' };
@@ -203,6 +218,7 @@ export class MailService {
     apiKey: string;
     fromEmail: string;
     fromName: string;
+    replyTo?: string;
     to: string[];
     subject: string;
     html: string;
@@ -217,6 +233,7 @@ export class MailService {
         },
         body: JSON.stringify({
           from: `${params.fromName} <${params.fromEmail}>`,
+          reply_to: params.replyTo,
           to: params.to,
           subject: params.subject,
           html: params.html,
@@ -250,6 +267,7 @@ export class MailService {
     pass: string;
     fromEmail: string;
     fromName: string;
+    replyTo?: string;
     to: string[];
     subject: string;
     html: string;
@@ -271,6 +289,7 @@ export class MailService {
 
       const info = await transporter.sendMail({
         from: `"${params.fromName}" <${params.fromEmail}>`,
+        replyTo: params.replyTo,
         to: params.to.join(', '),
         subject: params.subject,
         html: params.html,

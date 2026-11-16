@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { requestJson } from '../http.js';
+import { PlatformSettingsService } from '../../platform-settings/platform-settings.service.js';
 
 export interface CertificateIssueRequest {
   idempotencyKey: string;
@@ -12,26 +13,27 @@ export interface CertificateIssueRequest {
 export interface CertificateIssueResponse { id: string; code: string; status: string; verifyUrl?: string }
 
 /**
- * Sistema de Certificados del IIAP (flujo 05). Variables: CERTIFICATES_API_URL
- * y CERTIFICATES_API_KEY (X-API-Key con permiso de emisión).
+ * Sistema de Certificados del IIAP (flujo 05). URL y API key (X-API-Key con
+ * permiso de emisión) se configuran en Administración > Configuración.
  *
  * Contrato PROPUESTO: POST {url}/api/v1/certificates/issue con cabecera
- * Idempotency-Key. La API actual de Certificados aún no ofrece emisión por API
- * key; sin estas variables, Eventos emite y verifica los certificados localmente.
+ * Idempotency-Key. Sin URL y clave, Eventos emite y verifica localmente.
  */
 @Injectable()
 export class CertificatesClient {
+  constructor(private readonly settings: PlatformSettingsService) {}
+
   get configured() {
-    return !!(process.env.CERTIFICATES_API_URL && process.env.CERTIFICATES_API_KEY);
+    return this.settings.isReady('certificates');
   }
 
   issue(request: CertificateIssueRequest) {
-    const base = process.env.CERTIFICATES_API_URL!.replace(/\/+$/, '');
-    return requestJson<CertificateIssueResponse>(`${base}/api/v1/certificates/issue`, {
+    const cfg = this.settings.get('certificates');
+    return requestJson<CertificateIssueResponse>(`${cfg.apiUrl.replace(/\/+$/, '')}/api/v1/certificates/issue`, {
       provider: 'Certificados',
       method: 'POST',
       body: request,
-      headers: { 'X-API-Key': process.env.CERTIFICATES_API_KEY!, 'Idempotency-Key': request.idempotencyKey },
+      headers: { 'X-API-Key': cfg.apiKey, 'Idempotency-Key': request.idempotencyKey },
       timeoutMs: 60_000,
     });
   }

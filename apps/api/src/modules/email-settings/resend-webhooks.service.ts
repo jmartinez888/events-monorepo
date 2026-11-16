@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service.js';
 import { decryptCredential, encryptCredential } from '../../common/utils/encryption.util.js';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service.js';
+import { config } from '../../common/config.js';
 
 const RESEND_API_URL = 'https://api.resend.com';
 const DEFAULT_EVENTS = ['email.delivered', 'email.bounced', 'email.complained', 'email.failed'];
@@ -13,7 +15,7 @@ type WebhookUpdate = {
 
 @Injectable()
 export class ResendWebhooksService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly platform: PlatformSettingsService) {}
 
   async list(organizationId: string) {
     const data = await this.request(organizationId, '/webhooks');
@@ -135,9 +137,9 @@ export class ResendWebhooksService {
   }
 
   private publicEndpoint() {
-    const configured = (process.env.EMAIL_TRACKING_BASE_URL || '').trim().replace(/\/$/, '');
+    const configured = (this.platform.get('mail').trackingBaseUrl || config.apiPublicUrl()).trim().replace(/\/+$/, '');
     if (!configured || configured.includes('localhost')) {
-      throw new BadRequestException('EMAIL_TRACKING_BASE_URL debe apuntar a la URL pública del API antes de crear el webhook.');
+      throw new BadRequestException('Define una URL pública para el seguimiento de correos en Administración > Configuración > Correo antes de crear el webhook.');
     }
     return `${configured}/email-tracking/provider-events`;
   }

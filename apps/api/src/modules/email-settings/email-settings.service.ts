@@ -27,9 +27,6 @@ export class EmailSettingsService {
     }
 
     const settings = org.emailSettings;
-    const defaultEnvResendKey = process.env.RESEND_API_KEY || '';
-    const defaultEnvFromEmail = process.env.RESEND_FROM_EMAIL || 'noreply@asipe.site';
-    const defaultEnvFromName = process.env.RESEND_FROM_NAME || org.name || 'Events Platform';
 
     if (!settings) {
       return {
@@ -198,7 +195,7 @@ export class EmailSettingsService {
 
     let resendApiKey = dto.resendApiKey;
     if (!resendApiKey || resendApiKey.includes('••••')) {
-      resendApiKey = settings?.resendApiKeyEncrypted ? decryptCredential(settings.resendApiKeyEncrypted) : process.env.RESEND_API_KEY;
+      resendApiKey = settings?.resendApiKeyEncrypted ? decryptCredential(settings.resendApiKeyEncrypted) : undefined;
     }
 
     let smtpPass = dto.smtpPass;
@@ -206,7 +203,7 @@ export class EmailSettingsService {
       smtpPass = settings?.smtpPassEncrypted ? decryptCredential(settings.smtpPassEncrypted) : undefined;
     }
 
-    const fromEmail = dto.resendFromEmail || dto.smtpFromEmail || settings?.resendFromEmail || settings?.smtpFromEmail || process.env.RESEND_FROM_EMAIL || 'noreply@asipe.site';
+    const fromEmail = dto.resendFromEmail || dto.smtpFromEmail || settings?.resendFromEmail || settings?.smtpFromEmail || settings?.smtpUser || '';
     const fromName = dto.resendFromName || dto.smtpFromName || settings?.resendFromName || settings?.smtpFromName || org.name || 'Zynqro Events';
 
     const testSubject = `🎉 Verificación de correo exitosa - ${org.name}`;

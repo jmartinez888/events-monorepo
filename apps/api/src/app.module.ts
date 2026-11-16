@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from './database/prisma.module.js';
+import { PlatformSettingsModule } from './modules/platform-settings/platform-settings.module.js';
+import { PlatformSettingsAdminModule } from './modules/platform-settings/platform-settings.controller.js';
 import { HealthController } from './health.controller.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { ProfilesModule } from './modules/profiles/profiles.module.js';
@@ -28,6 +30,7 @@ import { DirectoryModule } from './modules/directory/directory.module.js';
 @Module({
   imports: [
     PrismaModule,
+    PlatformSettingsModule,
     MailModule,
     StorageModule,
     IntegrationCoreModule,
@@ -51,6 +54,7 @@ import { DirectoryModule } from './modules/directory/directory.module.js';
     RegistrationsModule,
     EventFilesModule,
     IntegrationsModule,
+    PlatformSettingsAdminModule,
   ],
   controllers: [HealthController],
 })

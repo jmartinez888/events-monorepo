@@ -1,28 +1,34 @@
 import { Injectable } from '@nestjs/common';
 import { hmacHex, safeEqualText } from '../../../common/security/crypto.js';
 import { requestJson } from '../http.js';
+import { PlatformSettingsService } from '../../platform-settings/platform-settings.service.js';
 
 export interface AttendanceAttendee { id: string; user_name?: string; user_email?: string; document_number?: string | null; registered_at?: string; is_external?: boolean }
 
 /**
  * Sistema de Asistencia del IIAP (attendance-control, flujo 03). Eventos es el
- * dueño del evento; Asistencia guarda un espejo. Variables: ATTENDANCE_API_URL
- * (con /api), ATTENDANCE_API_TOKEN (cuenta de servicio con rol ADMIN_EVENTO),
- * ATTENDANCE_WEBHOOK_SECRET (firma de marcas entrantes) y ATTENDANCE_SERVICE_KEY
- * (clave con la que Asistencia pide a Eventos registrar personas nuevas).
+ * dueño del evento; Asistencia guarda un espejo. Se configura en Administración:
+ * URL (con /api), token de la cuenta de servicio (rol ADMIN_EVENTO), secreto de
+ * firma de marcas entrantes y clave con la que Asistencia registra personas nuevas.
  */
 @Injectable()
 export class AttendanceClient {
+  constructor(private readonly settings: PlatformSettingsService) {}
+
+  private get cfg() {
+    return this.settings.get('attendance');
+  }
+
   get configured() {
-    return !!(process.env.ATTENDANCE_API_URL && process.env.ATTENDANCE_API_TOKEN);
+    return this.settings.isReady('attendance');
   }
 
   private get base() {
-    return process.env.ATTENDANCE_API_URL!.replace(/\/+$/, '');
+    return this.cfg.apiUrl.replace(/\/+$/, '');
   }
 
   private call<T>(method: string, path: string, body?: unknown) {
-    return requestJson<T>(`${this.base}${path}`, { provider: 'Asistencia', method, body, headers: { Authorization: `Bearer ${process.env.ATTENDANCE_API_TOKEN}` } });
+    return requestJson<T>(`${this.base}${path}`, { provider: 'Asistencia', method, body, headers: { Authorization: `Bearer ${this.cfg.apiToken}` } });
   }
 
   createEvent(input: MirrorEvent) {
@@ -36,6 +42,11 @@ export class AttendanceClient {
   /** Lectura completa del espejo: base de la reconciliación al cierre. */
   getEvent(externalId: string) {
     return this.call<{ id: string; attendees?: AttendanceAttendee[] }>('GET', `/events/${encodeURIComponent(externalId)}`);
+  }
+
+  /** Prueba de conexión: el servicio responde con el token guardado. */
+  ping() {
+    return this.call<unknown>('GET', '/events?limit=1');
   }
 
   private payload(input: MirrorEvent) {
@@ -53,13 +64,13 @@ export class AttendanceClient {
 
   /** Firma HMAC-SHA256 hex del cuerpo en X-Attendance-Signature. */
   verifyWebhook(rawBody: string, signature: string | undefined) {
-    const secret = process.env.ATTENDANCE_WEBHOOK_SECRET;
+    const secret = this.cfg.webhookSecret;
     if (!secret || !signature) return false;
     return safeEqualText(signature.replace(/^sha256=/, ''), hmacHex(secret, rawBody));
   }
 
   verifyServiceKey(key: string | undefined) {
-    const expected = process.env.ATTENDANCE_SERVICE_KEY;
+    const expected = this.cfg.serviceKey;
     return !!expected && !!key && safeEqualText(key, expected);
   }
 }

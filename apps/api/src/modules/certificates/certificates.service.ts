@@ -18,7 +18,7 @@ export interface Skipped { participantId: string; roleId: string | null; reason:
 
 /**
  * Emisión por persona y rol (flujo 05). Cada rol define horas, glosa, plantilla y
- * si exige asistencia. Con CERTIFICATES_API_URL configurado, la emisión se
+ * si exige asistencia. Con el Sistema de Certificados configurado en Administración, la emisión se
  * orquesta en el sistema de Certificados mediante una cola con clave de
  * idempotencia; si no, Eventos emite y verifica localmente.
  */

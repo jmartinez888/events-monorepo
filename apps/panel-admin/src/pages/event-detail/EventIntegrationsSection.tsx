@@ -162,7 +162,7 @@ export function EventIntegrationsSection() {
                 <p className="text-xs text-muted-foreground">{description}</p>
               </div>
             </div>
-            {configured ? <Badge variant="secondary">Credenciales configuradas</Badge> : <Badge variant="outline" className="gap-1"><AlertTriangle className="size-3" />Falta configurar en el servidor</Badge>}
+            {configured ? <Badge variant="secondary">Credenciales configuradas</Badge> : <Badge variant="outline" className="gap-1"><AlertTriangle className="size-3" />Falta configurar en Administración › Configuración</Badge>}
           </div>
         ))}
         <p className="text-xs text-muted-foreground">Certificados externos: {providers.certificates ? "conectado" : "emisión local"} · Telegram: {providers.telegram ? "bot activo" : "no configurado"} · Almacenamiento: {providers.storage}</p>

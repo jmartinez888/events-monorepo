@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { NotificationChannel, Prisma } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service.js';
+import { PlatformSettingsService } from '../platform-settings/platform-settings.service.js';
 import { MailService } from '../mail/mail.service.js';
 import { TelegramClient } from '../integrations/providers/telegram.client.js';
 import { config } from '../../common/config.js';
@@ -27,7 +28,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running = false;
 
-  constructor(private readonly prisma: PrismaService, private readonly mail: MailService, private readonly telegram: TelegramClient) {}
+  constructor(private readonly prisma: PrismaService, private readonly mail: MailService, private readonly telegram: TelegramClient, private readonly settings: PlatformSettingsService) {}
 
   onModuleInit() {
     if (process.env.NOTIFICATIONS_WORKER === 'false') return;
@@ -211,7 +212,7 @@ export class NotificationsService implements OnModuleInit, OnModuleDestroy {
     const data = { recipientName: name || undefined, title: content.title, message: content.message, actionText: content.actionText, actionUrl: content.actionUrl, details: content.details };
     const result = await this.mail.sendNotification(to, data, organizationId ?? undefined);
     // Sin configuración de correo institucional, solo se usa el proveedor global si se habilita explícitamente.
-    if (!result.sent && organizationId && process.env.MAIL_SYSTEM_FALLBACK === 'true') return this.mail.sendNotification(to, data);
+    if (!result.sent && organizationId && this.settings.get('mail').organizationFallback) return this.mail.sendNotification(to, data);
     return result;
   }
 
