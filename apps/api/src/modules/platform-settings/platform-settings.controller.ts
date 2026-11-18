@@ -96,8 +96,19 @@ export class OrganizationIntegrationSettingsController {
     switch (section) {
       case 'zoom': {
         requireReady(this.zoom.configured(organizationId), 'Zoom');
-        const user = await run(() => this.zoom.getHostUser(organizationId));
-        return { ok: true, message: `Conectado como ${[user.first_name, user.last_name].filter(Boolean).join(' ') || user.email || user.id}` };
+        const scopes = await run(() => this.zoom.checkAccess(organizationId));
+        // Acepta permisos clásicos (meeting:write:admin) y granulares (meeting:write:meeting:admin).
+        const missing = [
+          { label: 'crear reuniones', ok: scopes.some((s) => s.startsWith('meeting:write')) },
+          { label: 'leer el reporte de asistencia', ok: scopes.some((s) => s.startsWith('report:read')) },
+        ].filter((need) => !need.ok).map((need) => need.label);
+        if (!scopes.length) return { ok: true, message: 'Credenciales válidas: Zoom entregó un token de acceso' };
+        return {
+          ok: missing.length === 0,
+          message: missing.length
+            ? `Credenciales válidas, pero la app no tiene permiso para ${missing.join(' ni para ')}. Agrégalo en marketplace.zoom.us › tu app › Scopes.`
+            : 'Credenciales válidas y con permisos para crear reuniones y leer la asistencia',
+        };
       }
       case 'facebook': {
         requireReady(this.facebook.configured(organizationId), 'Facebook Live');

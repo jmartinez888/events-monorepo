@@ -15,6 +15,7 @@ export interface ZoomParticipant { id?: string; user_id?: string; name?: string;
 export class ZoomClient {
   /** Un token por institución; se descarta si cambian sus credenciales. */
   private tokens = new Map<string, { value: string; expiresAt: number; credentials: string }>();
+  private scopes = new Map<string, string[]>();
   private readonly base = 'https://api.zoom.us/v2';
 
   constructor(private readonly settings: PlatformSettingsService) {}
@@ -39,18 +40,25 @@ export class ZoomClient {
     if (cached && cached.credentials === credentials && cached.expiresAt > Date.now() + 60_000) return cached.value;
     const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
     const url = `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${encodeURIComponent(accountId)}`;
-    const data = await requestJson<{ access_token: string; expires_in: number }>(url, { provider: 'Zoom OAuth', method: 'POST', headers: { Authorization: `Basic ${basic}` } });
+    const data = await requestJson<{ access_token: string; expires_in: number; scope?: string }>(url, { provider: 'Zoom OAuth', method: 'POST', headers: { Authorization: `Basic ${basic}` } });
     this.tokens.set(cacheKey, { value: data.access_token, expiresAt: Date.now() + data.expires_in * 1000, credentials });
+    this.scopes.set(cacheKey, (data.scope ?? '').split(/\s+/).filter(Boolean));
     return data.access_token;
+  }
+
+  /**
+   * Prueba de conexión: pide un token con las credenciales guardadas y devuelve
+   * los permisos (scopes) que la app tiene. No llama a /users, que exige un
+   * permiso de lectura de usuarios que Eventos no necesita.
+   */
+  async checkAccess(organizationId: string | null | undefined) {
+    this.tokens.delete(organizationId ?? '');
+    await this.accessToken(organizationId);
+    return this.scopes.get(organizationId ?? '') ?? [];
   }
 
   private async call<T>(organizationId: string | null | undefined, method: string, path: string, body?: unknown) {
     return requestJson<T>(`${this.base}${path}`, { provider: 'Zoom', method, body, headers: { Authorization: `Bearer ${await this.accessToken(organizationId)}` } });
-  }
-
-  /** Prueba de conexión: datos del usuario anfitrión con las credenciales guardadas. */
-  getHostUser(organizationId: string | null | undefined) {
-    return this.call<{ id: string; email?: string; first_name?: string; last_name?: string }>(organizationId, 'GET', `/users/${encodeURIComponent(this.cfg(organizationId).userId || 'me')}`);
   }
 
   createMeeting(organizationId: string | null | undefined, input: { topic: string; startTime: Date; durationMinutes: number; agenda?: string; registration: boolean }) {
