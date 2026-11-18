@@ -28,6 +28,7 @@ export interface SendCustomMailOptions {
   smtpFromName?: string;
   fromName?: string;
   fromEmail?: string;
+  replyTo?: string;
 }
 
 export interface MailDeliveryResult {

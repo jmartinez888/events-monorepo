@@ -56,7 +56,7 @@ export class MailService {
             return { sent: false, reason: 'No se pudo leer la credencial de Resend de la institución.' };
           }
           const fromEmail = options.fromEmail || orgSettings.resendFromEmail;
-          const fromName = options.fromName || orgSettings.resendFromName || 'Events Platform';
+          const fromName = options.fromName || orgSettings.resendFromName || config.appName();
 
           return this.sendWithResend({
             apiKey: resendApiKey,
@@ -79,7 +79,7 @@ export class MailService {
             return { sent: false, reason: 'No se pudo leer la contraseña SMTP de la institución.' };
           }
           const fromEmail = options.fromEmail || orgSettings.smtpFromEmail || orgSettings.smtpUser;
-          const fromName = options.fromName || orgSettings.smtpFromName || 'Events Platform';
+          const fromName = options.fromName || orgSettings.smtpFromName || config.appName();
 
           return this.sendWithSmtp({
             host: orgSettings.smtpHost || 'smtp.gmail.com',
@@ -178,6 +178,7 @@ export class MailService {
         apiKey,
         fromEmail,
         fromName,
+        replyTo: options.replyTo,
         to: toRecipients,
         subject: options.subject,
         html: options.html,
@@ -192,7 +193,7 @@ export class MailService {
     const user = options.smtpUser;
     const pass = options.smtpPass;
     const fromEmail = options.fromEmail || options.smtpFromEmail || user || 'no-reply@gmail.com';
-    const fromName = options.fromName || options.smtpFromName || 'Events Platform';
+    const fromName = options.fromName || options.smtpFromName || config.appName();
 
     if (!user || !pass) {
       return { sent: false, reason: 'Faltan credenciales de usuario o contraseña para el servidor SMTP.' };
@@ -206,6 +207,7 @@ export class MailService {
       pass,
       fromEmail,
       fromName,
+      replyTo: options.replyTo,
       to: toRecipients,
       subject: options.subject,
       html: options.html,

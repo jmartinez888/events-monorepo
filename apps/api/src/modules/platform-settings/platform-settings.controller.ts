@@ -8,6 +8,7 @@ import { ZoomClient } from '../integrations/providers/zoom.client.js';
 import { FacebookClient } from '../integrations/providers/facebook.client.js';
 import { AttendanceClient } from '../integrations/providers/attendance.client.js';
 import { TelegramClient } from '../integrations/providers/telegram.client.js';
+import { CertificatesClient } from '../integrations/providers/certificates.client.js';
 import { PrismaService } from '../../database/prisma.service.js';
 
 class UpdateSectionDto {
@@ -72,6 +73,7 @@ export class OrganizationIntegrationSettingsController {
     private readonly facebook: FacebookClient,
     private readonly attendance: AttendanceClient,
     private readonly telegram: TelegramClient,
+    private readonly certificates: CertificatesClient,
   ) {}
 
   @Get()
@@ -106,6 +108,17 @@ export class OrganizationIntegrationSettingsController {
         requireReady(this.attendance.configured(organizationId), 'el Sistema de Asistencia');
         await run(() => this.attendance.ping(organizationId));
         return { ok: true, message: 'El Sistema de Asistencia respondió correctamente' };
+      }
+      case 'certificates': {
+        requireReady(this.certificates.configured(organizationId), 'el Sistema de Certificados');
+        const key = await run(() => this.certificates.me(organizationId));
+        const missing = ['certificates:write', 'certificates:read', 'email:send'].filter((scope) => !key.scopes.includes(scope));
+        return {
+          ok: missing.length === 0,
+          message: missing.length
+            ? `Conectado con la clave «${key.name}», pero le faltan permisos: ${missing.join(', ')}`
+            : `Conectado con la clave «${key.name}» (${key.scopes.join(', ')})`,
+        };
       }
       case 'telegram': {
         const cfg = this.settings.forOrganization(organizationId, 'telegram');

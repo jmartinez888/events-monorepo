@@ -207,8 +207,13 @@ export class EmailSettingsService {
       smtpPass = settings?.smtpPassEncrypted ? decryptCredential(settings.smtpPassEncrypted) : undefined;
     }
 
-    const fromEmail = dto.resendFromEmail || dto.smtpFromEmail || settings?.resendFromEmail || settings?.smtpFromEmail || settings?.smtpUser || '';
-    const fromName = dto.resendFromName || dto.smtpFromName || settings?.resendFromName || settings?.smtpFromName || org.name || 'Zynqro Events';
+    // El remitente sale de la configuración del proveedor elegido, igual que en los envíos reales.
+    const isResend = provider === 'RESEND';
+    const fromEmail = isResend
+      ? dto.resendFromEmail || settings?.resendFromEmail || ''
+      : dto.smtpFromEmail || settings?.smtpFromEmail || dto.smtpUser || settings?.smtpUser || '';
+    const fromName = (isResend ? dto.resendFromName || settings?.resendFromName : dto.smtpFromName || settings?.smtpFromName) || org.name;
+    const replyTo = settings?.replyTo || undefined;
 
     const testSubject = `🎉 Verificación de correo exitosa - ${org.name}`;
     const testHtml = `
@@ -228,7 +233,7 @@ export class EmailSettingsService {
           </ul>
         </div>
         <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 0;">
-          Este es un mensaje de prueba enviado desde el panel de administración de Zynqro Events.
+          Este es un mensaje de prueba enviado desde el panel de Eventos.
         </p>
       </div>
     `;
@@ -236,8 +241,9 @@ export class EmailSettingsService {
     const result = await this.mailService.sendCustom({
       provider: provider as any,
       resendApiKey: resendApiKey || undefined,
-      resendFromEmail: fromEmail,
-      resendFromName: fromName,
+      fromEmail,
+      fromName,
+      replyTo,
       smtpHost: dto.smtpHost || settings?.smtpHost || 'smtp.gmail.com',
       smtpPort: dto.smtpPort || settings?.smtpPort || 587,
       smtpSecure: dto.smtpSecure ?? settings?.smtpSecure ?? false,

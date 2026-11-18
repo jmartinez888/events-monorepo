@@ -27,6 +27,16 @@ export class CertificatesClient {
     return this.settings.isReady(organizationId, 'certificates');
   }
 
+  /** Comprueba URL y clave: devuelve nombre y permisos de la API key. */
+  me(organizationId: string | null | undefined) {
+    const cfg = this.settings.forOrganization(organizationId, 'certificates');
+    return requestJson<{ name: string; prefix: string; scopes: string[]; expiresAt: string | null }>(`${cfg.apiUrl.replace(/\/+$/, '')}/api/v1/me`, {
+      provider: 'Certificados',
+      headers: { 'X-API-Key': cfg.apiKey },
+      timeoutMs: 15_000,
+    });
+  }
+
   issue(organizationId: string | null | undefined, request: CertificateIssueRequest) {
     const cfg = this.settings.forOrganization(organizationId, 'certificates');
     return requestJson<CertificateIssueResponse>(`${cfg.apiUrl.replace(/\/+$/, '')}/api/v1/certificates/issue`, {

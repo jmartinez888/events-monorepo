@@ -129,7 +129,7 @@ const SECTIONS: SectionSpec[] = [
     ],
   },
   {
-    key: "certificates", title: "Sistema de Certificados", icon: Award,
+    key: "certificates", title: "Sistema de Certificados", icon: Award, testable: true,
     summary: "Con URL y clave, la emisión pasa al Sistema de Certificados. Sin ellas, Eventos emite y verifica localmente.",
     groups: [
       {
